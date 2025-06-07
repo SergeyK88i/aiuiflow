@@ -232,7 +232,6 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
             
             # Выполняем workflow
             logger.info(f"🚀 Таймер {timer_id} запускает workflow")
-            
             try:
                 # Выполняем workflow, начиная с ноды таймера
                 results = {}
@@ -247,7 +246,6 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                 # Выполняем ноду таймера
                 timer_result = await executors.execute_timer(timer_node, {})
                 results[node_id] = timer_result
-                
                 logs.append({
                     "message": f"Timer {node_id} executed by scheduler",
                     "timestamp": datetime.now().isoformat(),
@@ -255,23 +253,34 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                     "nodeId": node_id
                 })
                 
-                # Находим следующие ноды по соединениям
-                next_connections = [c for c in workflow_info["connections"] if c.source == node_id]
-                
                 # Рекурсивная функция для выполнения следующих нод
                 async def execute_next_nodes(current_node_id, input_data):
-                    connections = [c for c in workflow_info["connections"] if c.source == current_node_id]
-                    for connection in connections:
-                        target_node = next((n for n in workflow_info["nodes"] if n.id == connection.target), None)
+                    # Находим соединения, исходящие из текущей ноды
+                    next_connections = [c for c in workflow_info["connections"] if c.source == current_node_id]
+                    
+                    # Логируем найденные соединения
+                    logger.info(f"🔍 Найдено {len(next_connections)} соединений от ноды {current_node_id}")
+                    
+                    for connection in next_connections:
+                        target_node_id = connection.target
+                        logger.info(f"🔄 Обрабатываем соединение: {current_node_id} -> {target_node_id}")
+                        
+                        target_node = next((n for n in workflow_info["nodes"] if n.id == target_node_id), None)
                         if not target_node:
+                            logger.error(f"❌ Целевая нода {target_node_id} не найдена")
                             continue
+                        
+                        logger.info(f"🎯 Найдена целевая нода {target_node_id} типа {target_node.type}")
                         
                         logs.append({
                             "message": f"Executing {target_node.data.get('label', target_node.type)}...",
                             "timestamp": datetime.now().isoformat(),
                             "level": "info",
-                            "nodeId": target_node.id
+                            "nodeId": target_node_id
                         })
+                        
+                        # Логируем входные данные
+                        logger.info(f"📥 Передаем данные в ноду {target_node_id}: {str(input_data)[:200]}...")
                         
                         # Выбираем исполнитель для ноды
                         executor_map = {
@@ -285,29 +294,33 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                         executor = executor_map.get(target_node.type)
                         if executor:
                             try:
+                                logger.info(f"🚀 Запускаем выполнение ноды {target_node_id} типа {target_node.type}")
                                 result = await executor(target_node, input_data)
-                                results[target_node.id] = result
+                                logger.info(f"✅ Нода {target_node_id} успешно выполнена")
+                                logger.info(f"📊 Результат ноды {target_node_id}: {str(result)[:200]}...")
                                 
+                                results[target_node_id] = result
                                 logs.append({
                                     "message": f"{target_node.data.get('label', target_node.type)} completed successfully",
                                     "timestamp": datetime.now().isoformat(),
                                     "level": "success",
-                                    "nodeId": target_node.id
+                                    "nodeId": target_node_id
                                 })
                                 
                                 # Рекурсивно выполняем следующие ноды
-                                await execute_next_nodes(target_node.id, result)
+                                await execute_next_nodes(target_node_id, result)
                             except Exception as e:
+                                logger.error(f"❌ Ошибка выполнения ноды {target_node_id}: {str(e)}")
                                 logs.append({
                                     "message": f"Error executing {target_node.data.get('label', target_node.type)}: {str(e)}",
                                     "timestamp": datetime.now().isoformat(),
                                     "level": "error",
-                                    "nodeId": target_node.id
+                                    "nodeId": target_node_id
                                 })
                 
                 # Запускаем выполнение следующих нод
+                logger.info(f"🚀 Запускаем выполнение следующих нод после таймера {node_id}")
                 await execute_next_nodes(node_id, timer_result)
-                
                 logger.info(f"✅ Таймер {timer_id} успешно выполнил workflow")
                 
             except Exception as e:
@@ -315,7 +328,7 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                 logger.error(f"📋 Детали ошибки: {e.__class__.__name__}")
                 import traceback
                 logger.error(f"🔍 Трассировка: {traceback.format_exc()}")
-    
+                
     except asyncio.CancelledError:
         logger.info(f"🛑 Таймер {timer_id} остановлен")
     except Exception as e:
@@ -323,6 +336,7 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
         # Обновляем статус таймера
         if timer_id in active_timers:
             active_timers[timer_id]["status"] = "error"
+
 
 # Исполнители нод
 class NodeExecutors:
