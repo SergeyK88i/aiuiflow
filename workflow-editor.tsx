@@ -395,10 +395,16 @@ export default function WorkflowEditor() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          id: node.id,
-          position: node.position,
-          config: node.data.config,
-          label: node.data.label,
+          node_data: {
+            id: node.id,
+            type: node.type,
+            position: node.position,
+            data: {
+              config: node.data.config,
+              label: node.data.label,
+            }
+          },
+          input_data: null
         }),
       })
 

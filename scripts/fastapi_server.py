@@ -166,11 +166,18 @@ class NodeExecutors:
 
     async def execute_gigachat(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение GigaChat ноды"""
+        logger.info(f"Executing GigaChat node: {node}")
+        logger.info(f"Node data: {node.data}")
+        logger.info(f"Config: {node.data.get('config', {})}")
+
         config = node.data.get('config', {})
         auth_token = config.get('authToken')
         system_message = config.get('systemMessage', 'Ты полезный ассистент')
         user_message = config.get('userMessage', '')
         clear_history = config.get('clearHistory', False)
+
+        logger.info(f"Auth token: {auth_token is not None}")
+        logger.info(f"User message: {user_message}")
 
         if not auth_token or not user_message:
             raise Exception("GigaChat: Auth token and user message are required")
@@ -329,13 +336,18 @@ async def execute_node(
 ):
     """Выполнение отдельной ноды"""
     try:
+        logger.info(f"Received request for node_type: {node_type}")
+        logger.info(f"node_data: {json.dumps(node_data, indent=2)}")
         # Создаем объект ноды
         node = Node(
             id=node_data.get('id', 'temp'),
             type=node_type,
             position=node_data.get('position', {'x': 0, 'y': 0}),
-            data=node_data
+            data=node_data.get('data', {})
         )
+        logger.info(f"Created node: {node}")
+        logger.info(f"Node data: {node.data}")
+        logger.info(f"Config: {node.data.get('config', {})}")
 
         # Выбираем исполнитель
         executor_map = {
