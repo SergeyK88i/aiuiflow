@@ -14,6 +14,11 @@ import {
   MessageSquare,
   Square,
   ExternalLink,
+  Pause,
+  Clock,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -39,6 +44,14 @@ interface Connection {
   id: string
   source: string
   target: string
+}
+
+interface TimerData {
+  id: string
+  node_id: string
+  interval: number
+  next_execution: string
+  status: "active" | "paused" | "error"
 }
 
 const API_BASE_URL = "http://localhost:8000"
@@ -78,11 +91,125 @@ export default function WorkflowEditor() {
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">("checking")
   const [debugInfo, setDebugInfo] = useState<string>("")
 
+  // Состояние для таймеров
+  const [timers, setTimers] = useState<TimerData[]>([])
+  const [timerRefreshInterval, setTimerRefreshInterval] = useState<NodeJS.Timeout | null>(null)
+
   // Проверка статуса API при загрузке
   useEffect(() => {
     console.log("🚀 Компонент загружен, проверяем API...")
     checkApiStatus()
   }, [])
+
+  // Загрузка и обновление таймеров
+  useEffect(() => {
+    // Загружаем таймеры при монтировании компонента
+    loadTimers()
+
+    // Устанавливаем интервал для обновления таймеров
+    const interval = setInterval(loadTimers, 10000) // Обновляем каждые 10 секунд
+    setTimerRefreshInterval(interval)
+
+    return () => {
+      // Очищаем интервал при размонтировании компонента
+      if (timerRefreshInterval) {
+        clearInterval(timerRefreshInterval)
+      }
+      if (interval) {
+        clearInterval(interval)
+      }
+    }
+  }, [apiStatus])
+
+  const loadTimers = async () => {
+    if (apiStatus === "offline") return
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/timers`)
+      if (response.ok) {
+        const data = await response.json()
+        setTimers(data.timers || [])
+      }
+    } catch (error) {
+      console.error("Error loading timers:", error)
+    }
+  }
+
+  const pauseTimer = async (timerId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/timers/${timerId}/pause`, {
+        method: "POST",
+      })
+      if (response.ok) {
+        loadTimers() // Обновляем список таймеров
+      }
+    } catch (error) {
+      console.error(`Error pausing timer ${timerId}:`, error)
+    }
+  }
+
+  const resumeTimer = async (timerId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/timers/${timerId}/resume`, {
+        method: "POST",
+      })
+      if (response.ok) {
+        loadTimers() // Обновляем список таймеров
+      }
+    } catch (error) {
+      console.error(`Error resuming timer ${timerId}:`, error)
+    }
+  }
+
+  const deleteTimer = async (timerId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/timers/${timerId}`, {
+        method: "DELETE",
+      })
+      if (response.ok) {
+        loadTimers() // Обновляем список таймеров
+      }
+    } catch (error) {
+      console.error(`Error deleting timer ${timerId}:`, error)
+    }
+  }
+
+  const executeTimerNow = async (timerId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/timers/${timerId}/execute-now`, {
+        method: "POST",
+      })
+      if (response.ok) {
+        // Обрабатываем результат выполнения
+        const result = await response.json()
+
+        // Обновляем логи и результаты
+        if (result.logs) {
+          result.logs.forEach((log: any, index: number) => {
+            setTimeout(() => {
+              setExecutionLogs((prev) => [
+                ...prev,
+                {
+                  id: `${Date.now()}-${index}`,
+                  nodeId: log.nodeId || "system",
+                  status: log.level === "error" ? "error" : log.level === "success" ? "success" : "running",
+                  message: log.message,
+                  timestamp: new Date(log.timestamp),
+                  data: log.data,
+                },
+              ])
+            }, index * 500)
+          })
+        }
+
+        if (result.result) {
+          setExecutionResults(result.result)
+        }
+      }
+    } catch (error) {
+      console.error(`Error executing timer ${timerId}:`, error)
+    }
+  }
 
   const checkApiStatus = async () => {
     setApiStatus("checking")
@@ -370,6 +497,13 @@ export default function WorkflowEditor() {
             }
           }, index * 500) // Задержка для анимации
         })
+
+        // Проверяем, есть ли ноды Timer в workflow
+        const hasTimerNodes = nodes.some((node) => node.type === "timer")
+        if (hasTimerNodes) {
+          // Обновляем список таймеров
+          loadTimers()
+        }
       } else {
         setExecutionLogs([
           {
@@ -421,9 +555,9 @@ export default function WorkflowEditor() {
             data: {
               config: node.data.config,
               label: node.data.label,
-            }
+            },
           },
-          input_data: null
+          input_data: null,
         }),
       })
 
@@ -442,6 +576,11 @@ export default function WorkflowEditor() {
             data: result.result,
           },
         ])
+
+        // Если это нода Timer, обновляем список таймеров
+        if (node.type === "timer") {
+          loadTimers()
+        }
       } else {
         setExecutionLogs((prev) => [
           ...prev,
@@ -514,11 +653,6 @@ export default function WorkflowEditor() {
             <ExternalLink className="w-4 h-4 mr-2" />
             Check API
           </Button>
-          {/*apiStatus === "offline" && (
-            <Button variant="outline" size="sm" onClick={() => setApiStatus("online")} className="text-orange-600">
-              Force Online
-            </Button>
-          )*/}
           <Button variant="outline" size="sm">
             <Save className="w-4 h-4 mr-2" />
             Save
@@ -551,7 +685,7 @@ export default function WorkflowEditor() {
             <br />
             Или проверьте:{" "}
             <a href="http://localhost:8000/health" target="_blank" className="text-blue-600 underline" rel="noreferrer">
-              http://localhost:8000/health
+              http
             </a>
           </AlertDescription>
         </Alert>
@@ -783,6 +917,76 @@ export default function WorkflowEditor() {
                           </SelectContent>
                         </Select>
                       </div>
+
+                      {/* Информация о статусе таймера */}
+                      {timers.some((timer) => timer.node_id === selectedNode.id) && (
+                        <div className="mt-4 p-3 bg-gray-50 rounded-md">
+                          <h4 className="text-sm font-medium mb-2">Timer Status</h4>
+                          {timers
+                            .filter((timer) => timer.node_id === selectedNode.id)
+                            .map((timer) => (
+                              <div key={timer.id} className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium">Status:</span>
+                                  {timer.status === "active" && (
+                                    <Badge variant="outline" className="text-xs bg-green-50">
+                                      <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
+                                      Active
+                                    </Badge>
+                                  )}
+                                  {timer.status === "paused" && (
+                                    <Badge variant="outline" className="text-xs bg-yellow-50">
+                                      <Pause className="w-3 h-3 mr-1 text-yellow-500" />
+                                      Paused
+                                    </Badge>
+                                  )}
+                                  {timer.status === "error" && (
+                                    <Badge variant="outline" className="text-xs bg-red-50">
+                                      <AlertCircle className="w-3 h-3 mr-1 text-red-500" />
+                                      Error
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium">Next run:</span>
+                                  <span className="text-xs">{new Date(timer.next_execution).toLocaleString()}</span>
+                                </div>
+                                <div className="flex items-center justify-between mt-2">
+                                  {timer.status === "active" ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() => pauseTimer(timer.id)}
+                                    >
+                                      <Pause className="w-3 h-3 mr-1" />
+                                      Pause Timer
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() => resumeTimer(timer.id)}
+                                    >
+                                      <Play className="w-3 h-3 mr-1" />
+                                      Resume Timer
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() => executeTimerNow(timer.id)}
+                                  >
+                                    <RefreshCw className="w-3 h-3 mr-1" />
+                                    Run Now
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
                     </>
                   )}
                 </CardContent>
@@ -919,6 +1123,100 @@ export default function WorkflowEditor() {
           </div>
         </div>
       </div>
+
+      {/* Active Timers Panel */}
+      {timers.length > 0 && (
+        <div className="absolute top-4 left-4 w-80 bg-white border rounded-lg shadow-lg overflow-hidden">
+          <div className="bg-gray-50 px-4 py-2 border-b flex items-center justify-between">
+            <h3 className="font-semibold text-sm flex items-center">
+              <Clock className="w-4 h-4 mr-2" />
+              Active Timers
+            </h3>
+            <Button variant="ghost" size="sm" onClick={loadTimers} className="h-6 w-6 p-0">
+              <RefreshCw className="w-3 h-3" />
+            </Button>
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {timers.map((timer) => {
+              const timerNode = nodes.find((n) => n.id === timer.node_id)
+              const nextExecution = new Date(timer.next_execution)
+
+              return (
+                <div key={timer.id} className="p-3 border-b last:border-b-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="font-medium text-sm">
+                      {timerNode?.data.label || `Timer ${timer.id.split("_")[1]}`}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {timer.status === "active" ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => pauseTimer(timer.id)}
+                          title="Pause timer"
+                        >
+                          <Pause className="w-3 h-3" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => resumeTimer(timer.id)}
+                          title="Resume timer"
+                        >
+                          <Play className="w-3 h-3" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => executeTimerNow(timer.id)}
+                        title="Execute now"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-red-500"
+                        onClick={() => deleteTimer(timer.id)}
+                        title="Delete timer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-500 flex items-center gap-2">
+                    <span>Every {timer.interval} minutes</span>
+                    {timer.status === "active" && (
+                      <Badge variant="outline" className="text-xs">
+                        <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
+                        Active
+                      </Badge>
+                    )}
+                    {timer.status === "paused" && (
+                      <Badge variant="outline" className="text-xs">
+                        <Pause className="w-3 h-3 mr-1 text-yellow-500" />
+                        Paused
+                      </Badge>
+                    )}
+                    {timer.status === "error" && (
+                      <Badge variant="outline" className="text-xs">
+                        <AlertCircle className="w-3 h-3 mr-1 text-red-500" />
+                        Error
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-xs mt-1">Next run: {nextExecution.toLocaleString()}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Execution Logs Panel */}
       {executionLogs.length > 0 && (

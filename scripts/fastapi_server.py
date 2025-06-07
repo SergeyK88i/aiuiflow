@@ -24,6 +24,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Хранилище для активных таймеров
+active_timers = {}
+
 # Модели данных
 class NodeConfig(BaseModel):
     authToken: Optional[str] = None
@@ -158,6 +161,168 @@ class GigaChatAPI:
         """Очистка истории диалога"""
         self.conversation_history = []
         logger.info("🗑️ История диалога очищена")
+
+# Функция для создания и запуска таймера
+async def create_timer(timer_id: str, node_id: str, interval: int, workflow_info: Dict[str, Any]):
+    """Создает и запускает новый таймер"""
+    # Отменяем существующий таймер, если он есть
+    if timer_id in active_timers and active_timers[timer_id]["task"] is not None:
+        active_timers[timer_id]["task"].cancel()
+        logger.info(f"🛑 Отменен существующий таймер {timer_id}")
+    
+    # Создаем новый таймер
+    next_execution = datetime.now() + timedelta(minutes=interval)
+    
+    # Создаем и запускаем задачу таймера
+    task = asyncio.create_task(timer_task(timer_id, node_id, interval, workflow_info))
+    
+    # Сохраняем информацию о таймере
+    active_timers[timer_id] = {
+        "node_id": node_id,
+        "interval": interval,
+        "next_execution": next_execution,
+        "task": task,
+        "status": "active",
+        "workflow": workflow_info
+    }
+    
+    return {
+        "id": timer_id,
+        "node_id": node_id,
+        "interval": interval,
+        "next_execution": next_execution.isoformat(),
+        "status": "active"
+    }
+
+async def update_timer(timer_id: str, interval: int):
+    """Обновляет существующий таймер"""
+    if timer_id not in active_timers:
+        raise Exception(f"Timer {timer_id} not found")
+    
+    # Получаем информацию о существующем таймере
+    timer_info = active_timers[timer_id]
+    
+    # Создаем новый таймер с обновленным интервалом
+    await create_timer(
+        timer_id, 
+        timer_info["node_id"], 
+        interval, 
+        timer_info["workflow"]
+    )
+    
+    return {
+        "id": timer_id,
+        "node_id": timer_info["node_id"],
+        "interval": interval,
+        "next_execution": active_timers[timer_id]["next_execution"].isoformat(),
+        "status": "active"
+    }
+
+async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: Dict[str, Any]):
+    """Задача таймера, которая выполняется асинхронно"""
+    try:
+        while True:
+            # Ждем указанный интервал
+            logger.info(f"⏰ Запущена задача таймера {timer_id} для ноды {node_id} с интервалом {interval} минут")
+            logger.info(f"⏰ Таймер {timer_id} ожидает {interval} минут до следующего запуска")
+            await asyncio.sleep(interval * 60)  # Переводим минуты в секунды
+            
+            # Обновляем время следующего выполнения
+            active_timers[timer_id]["next_execution"] = datetime.now() + timedelta(minutes=interval)
+            
+            # Выполняем workflow
+            logger.info(f"🚀 Таймер {timer_id} запускает workflow")
+            
+            try:
+                # Выполняем workflow, начиная с ноды таймера
+                results = {}
+                logs = []
+                
+                # Находим ноду таймера
+                timer_node = next((n for n in workflow_info["nodes"] if n.id == node_id), None)
+                if not timer_node:
+                    logger.error(f"❌ Нода таймера {node_id} не найдена в workflow")
+                    continue
+                
+                # Выполняем ноду таймера
+                timer_result = await executors.execute_timer(timer_node, {})
+                results[node_id] = timer_result
+                
+                logs.append({
+                    "message": f"Timer {node_id} executed by scheduler",
+                    "timestamp": datetime.now().isoformat(),
+                    "level": "info",
+                    "nodeId": node_id
+                })
+                
+                # Находим следующие ноды по соединениям
+                next_connections = [c for c in workflow_info["connections"] if c.source == node_id]
+                
+                # Рекурсивная функция для выполнения следующих нод
+                async def execute_next_nodes(current_node_id, input_data):
+                    connections = [c for c in workflow_info["connections"] if c.source == current_node_id]
+                    for connection in connections:
+                        target_node = next((n for n in workflow_info["nodes"] if n.id == connection.target), None)
+                        if not target_node:
+                            continue
+                        
+                        logs.append({
+                            "message": f"Executing {target_node.data.get('label', target_node.type)}...",
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "info",
+                            "nodeId": target_node.id
+                        })
+                        
+                        # Выбираем исполнитель для ноды
+                        executor_map = {
+                            'gigachat': executors.execute_gigachat,
+                            'email': executors.execute_email,
+                            'database': executors.execute_database,
+                            'webhook': executors.execute_webhook,
+                            'timer': executors.execute_timer
+                        }
+                        
+                        executor = executor_map.get(target_node.type)
+                        if executor:
+                            try:
+                                result = await executor(target_node, input_data)
+                                results[target_node.id] = result
+                                
+                                logs.append({
+                                    "message": f"{target_node.data.get('label', target_node.type)} completed successfully",
+                                    "timestamp": datetime.now().isoformat(),
+                                    "level": "success",
+                                    "nodeId": target_node.id
+                                })
+                                
+                                # Рекурсивно выполняем следующие ноды
+                                await execute_next_nodes(target_node.id, result)
+                            except Exception as e:
+                                logs.append({
+                                    "message": f"Error executing {target_node.data.get('label', target_node.type)}: {str(e)}",
+                                    "timestamp": datetime.now().isoformat(),
+                                    "level": "error",
+                                    "nodeId": target_node.id
+                                })
+                
+                # Запускаем выполнение следующих нод
+                await execute_next_nodes(node_id, timer_result)
+                
+                logger.info(f"✅ Таймер {timer_id} успешно выполнил workflow")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка при выполнении workflow таймером {timer_id}: {str(e)}")
+                logger.error(f"📋 Детали ошибки: {e.__class__.__name__}")
+                import traceback
+                logger.error(f"🔍 Трассировка: {traceback.format_exc()}")
+    
+    except asyncio.CancelledError:
+        logger.info(f"🛑 Таймер {timer_id} остановлен")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в задаче таймера {timer_id}: {str(e)}")
+        # Обновляем статус таймера
+        if timer_id in active_timers:
+            active_timers[timer_id]["status"] = "error"
 
 # Исполнители нод
 class NodeExecutors:
@@ -303,15 +468,43 @@ class NodeExecutors:
         """Выполнение Timer ноды"""
         try:
             config = node.data.get('config', {})
-            interval = int(config.get('interval', 5))
+            
+            # Получаем интервал с обработкой ошибок
+            try:
+                interval = int(config.get('interval', 5))
+            except ValueError:
+                logger.warning(f"❌ Неверный формат интервала: {config.get('interval')}. Используем значение по умолчанию: 5")
+                interval = 5
+                
             timezone = config.get('timezone', 'UTC')
 
-            logger.info(f"⏰ Timer выполнен: интервал {interval} минут, часовой пояс {timezone}")
-
+            logger.info(f"⏰ Timer нода выполнена: интервал {interval} минут, часовой пояс {timezone}")
             # Для демонстрации просто возвращаем результат сразу
             current_time = datetime.now()
             next_execution = current_time + timedelta(minutes=interval)
             
+            # Проверяем, существует ли уже таймер для этой ноды
+            timer_id = f"timer_{node.id}"
+            
+            # Если это первое выполнение, создаем новый таймер
+            if timer_id not in active_timers:
+                # Сохраняем информацию о workflow для последующих запусков
+                workflow_info = {
+                    "nodes": [node],  # Начинаем с текущей ноды
+                    "connections": [],  # Будет заполнено позже
+                    "startNodeId": node.id
+                }
+                
+                # Создаем таймер
+                await create_timer(timer_id, node.id, interval, workflow_info)
+                
+                logger.info(f"🕒 Создан новый таймер {timer_id} с интервалом {interval} минут")
+            else:
+                # Обновляем существующий таймер
+                await update_timer(timer_id, interval)
+                logger.info(f"🕒 Обновлен таймер {timer_id} с новым интервалом {interval} минут")
+            
+            # Формируем выходные данные для следующих нод
             return {
                 "success": True,
                 "message": f"Timer triggered at {current_time.isoformat()}",
@@ -319,6 +512,7 @@ class NodeExecutors:
                 "timezone": timezone,
                 "timestamp": current_time.isoformat(),
                 "next_execution": next_execution.isoformat(),
+                "timer_id": timer_id,
                 "output": {
                     "text": f"Timer triggered at {current_time.isoformat()}. Next execution at {next_execution.isoformat()}",
                     "timestamp": current_time.isoformat(),
@@ -405,7 +599,14 @@ async def execute_node(
 async def execute_workflow(request: WorkflowExecuteRequest):
     """Выполнение полного workflow"""
     try:
+        # Улучшенное логирование
         logger.info(f"🚀 Запуск workflow с {len(request.nodes)} нодами")
+        for node in request.nodes:
+            logger.info(f"📋 Нода {node.id} типа {node.type}: {node.data.get('label', 'Без метки')}")
+        
+        logger.info(f"🔗 Соединения: {len(request.connections)}")
+        for conn in request.connections:
+            logger.info(f"🔗 Соединение: {conn.source} -> {conn.target}")
         
         # Находим стартовую ноду
         start_node = None
@@ -418,6 +619,16 @@ async def execute_workflow(request: WorkflowExecuteRequest):
 
         if not start_node:
             raise HTTPException(status_code=400, detail="No startable node found")
+
+        # Если это нода Timer, обновляем информацию о workflow в таймере
+        if start_node.type == "timer":
+            timer_id = f"timer_{start_node.id}"
+            if timer_id in active_timers:
+                active_timers[timer_id]["workflow"] = {
+                    "nodes": request.nodes,
+                    "connections": request.connections,
+                    "startNodeId": start_node.id
+                }
 
         # Выполняем workflow
         results = {}
@@ -485,6 +696,173 @@ async def execute_workflow(request: WorkflowExecuteRequest):
                 "level": "error"
             }]
         )
+
+# Новые эндпоинты для управления таймерами
+
+@app.get("/timers")
+async def get_timers():
+    """Получение списка всех активных таймеров"""
+    timers = []
+    for timer_id, timer in active_timers.items():
+        timers.append({
+            "id": timer_id,
+            "node_id": timer["node_id"],
+            "interval": timer["interval"],
+            "next_execution": timer["next_execution"].isoformat(),
+            "status": timer["status"]
+        })
+    return {"timers": timers}
+
+@app.get("/timers/{timer_id}")
+async def get_timer(timer_id: str):
+    """Получение информации о конкретном таймере"""
+    if timer_id not in active_timers:
+        raise HTTPException(status_code=404, detail=f"Timer {timer_id} not found")
+    
+    timer = active_timers[timer_id]
+    return {
+        "id": timer_id,
+        "node_id": timer["node_id"],
+        "interval": timer["interval"],
+        "next_execution": timer["next_execution"].isoformat(),
+        "status": timer["status"]
+    }
+
+@app.post("/timers/{timer_id}/pause")
+async def pause_timer(timer_id: str):
+    """Приостановка таймера"""
+    if timer_id not in active_timers:
+        raise HTTPException(status_code=404, detail=f"Timer {timer_id} not found")
+    
+    # Отменяем задачу таймера
+    if active_timers[timer_id]["task"] is not None:
+        active_timers[timer_id]["task"].cancel()
+    
+    # Обновляем статус
+    active_timers[timer_id]["status"] = "paused"
+    
+    logger.info(f"⏸️ Таймер {timer_id} приостановлен")
+    
+    return {
+        "id": timer_id,
+        "status": "paused",
+        "message": "Timer paused successfully"
+    }
+
+@app.post("/timers/{timer_id}/resume")
+async def resume_timer(timer_id: str):
+    """Возобновление таймера"""
+    if timer_id not in active_timers:
+        raise HTTPException(status_code=404, detail=f"Timer {timer_id} not found")
+    
+    timer = active_timers[timer_id]
+    
+    # Создаем новую задачу таймера
+    task = asyncio.create_task(timer_task(
+        timer_id, 
+        timer["node_id"], 
+        timer["interval"], 
+        timer["workflow"]
+    ))
+    
+    # Обновляем информацию о таймере
+    timer["task"] = task
+    timer["status"] = "active"
+    timer["next_execution"] = datetime.now() + timedelta(minutes=timer["interval"])
+    
+    logger.info(f"▶️ Таймер {timer_id} возобновлен")
+    
+    return {
+        "id": timer_id,
+        "status": "active",
+        "next_execution": timer["next_execution"].isoformat(),
+        "message": "Timer resumed successfully"
+    }
+
+@app.delete("/timers/{timer_id}")
+async def delete_timer(timer_id: str):
+    """Удаление таймера"""
+    if timer_id not in active_timers:
+        raise HTTPException(status_code=404, detail=f"Timer {timer_id} not found")
+    
+    # Отменяем задачу таймера
+    if active_timers[timer_id]["task"] is not None:
+        active_timers[timer_id]["task"].cancel()
+    
+    # Удаляем таймер из хранилища
+    del active_timers[timer_id]
+    
+    logger.info(f"🗑️ Таймер {timer_id} удален")
+    
+    return {
+        "message": f"Timer {timer_id} deleted successfully"
+    }
+
+@app.post("/timers/{timer_id}/update")
+async def update_timer_endpoint(timer_id: str, interval: int):
+    """Обновление интервала таймера"""
+    if timer_id not in active_timers:
+        raise HTTPException(status_code=404, detail=f"Timer {timer_id} not found")
+    
+    result = await update_timer(timer_id, interval)
+    
+    logger.info(f"🔄 Таймер {timer_id} обновлен с новым интервалом {interval} минут")
+    
+    return result
+
+@app.post("/timers/{timer_id}/execute-now")
+async def execute_timer_now(timer_id: str):
+    """Немедленное выполнение таймера"""
+    if timer_id not in active_timers:
+        raise HTTPException(status_code=404, detail=f"Timer {timer_id} not found")
+    
+    timer = active_timers[timer_id]
+    
+    # Получаем информацию о workflow
+    workflow_info = timer["workflow"]
+    
+    # Находим ноду таймера
+    timer_node = next((n for n in workflow_info["nodes"] if n.id == timer["node_id"]), None)
+    if not timer_node:
+        raise HTTPException(status_code=404, detail=f"Timer node {timer['node_id']} not found in workflow")
+    
+    # Выполняем workflow, начиная с ноды таймера
+    try:
+        # Создаем запрос на выполнение workflow
+        workflow_request = WorkflowExecuteRequest(
+            nodes=workflow_info["nodes"],
+            connections=workflow_info["connections"],
+            startNodeId=timer["node_id"]
+        )
+        
+        # Выполняем workflow
+        result = await execute_workflow(workflow_request)
+        
+        logger.info(f"✅ Таймер {timer_id} выполнен немедленно")
+        
+        return result
+    except Exception as e:
+        logger.error(f"❌ Ошибка при немедленном выполнении таймера {timer_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Обработчик запуска сервера
+@app.on_event("startup")
+async def startup_event():
+    """Выполняется при запуске сервера"""
+    logger.info("🚀 Сервер запущен")
+
+# Обработчик остановки сервера
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Выполняется при остановке сервера"""
+    logger.info("🛑 Остановка всех таймеров...")
+    
+    # Отменяем все активные таймеры
+    for timer_id, timer in active_timers.items():
+        if timer["task"] is not None:
+            timer["task"].cancel()
+    
+    logger.info("👋 Сервер остановлен")
 
 if __name__ == "__main__":
     import uvicorn
