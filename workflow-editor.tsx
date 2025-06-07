@@ -421,13 +421,82 @@ export default function WorkflowEditor() {
       },
     ])
   }
-
+  const saveWorkflow = async () => {
+    if (apiStatus === "offline" || nodes.length === 0) return;
+  
+    try {
+      setExecutionLogs((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          nodeId: "system",
+          status: "running",
+          message: "Saving workflow...",
+          timestamp: new Date(),
+        },
+      ]);
+  
+      const response = await fetch(`${API_BASE_URL}/save-workflow`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: workflowName,
+          nodes: nodes,
+          connections: connections,
+        }),
+      });
+  
+      const result = await response.json();
+      if (result.success) {
+        console.log("✅ Workflow saved successfully");
+        setExecutionLogs((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            nodeId: "system",
+            status: "success",
+            message: "Workflow saved successfully",
+            timestamp: new Date(),
+          },
+        ]);
+      } else {
+        console.error("❌ Failed to save workflow:", result.error);
+        setExecutionLogs((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            nodeId: "system",
+            status: "error",
+            message: `Failed to save workflow: ${result.error}`,
+            timestamp: new Date(),
+          },
+        ]);
+      }
+    } catch (error) {
+      console.error("❌ Error saving workflow:", error);
+      setExecutionLogs((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          nodeId: "system",
+          status: "error",
+          message: `Error saving workflow: ${error.message}`,
+          timestamp: new Date(),
+        },
+      ]);
+    }
+  };
+  
   const executeWorkflow = async (startNodeId?: string) => {
     if (nodes.length === 0) return
     if (apiStatus === "offline") {
       alert("API сервер недоступен. Запустите FastAPI сервер на порту 8000.")
       return
     }
+    // Сначала сохраняем workflow
+    await saveWorkflow();
 
     const controller = new AbortController()
     setAbortController(controller)
@@ -542,6 +611,10 @@ export default function WorkflowEditor() {
     setActiveNode(nodeId)
 
     try {
+       // Если это нода таймера, сначала сохраняем workflow
+      if (node.type === "timer") {
+        await saveWorkflow();
+      }
       const response = await fetch(`${API_BASE_URL}/execute-node?node_type=${node.type}`, {
         method: "POST",
         headers: {
@@ -653,7 +726,7 @@ export default function WorkflowEditor() {
             <ExternalLink className="w-4 h-4 mr-2" />
             Check API
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={saveWorkflow} disabled={nodes.length === 0 || apiStatus === "offline"}>
             <Save className="w-4 h-4 mr-2" />
             Save
           </Button>

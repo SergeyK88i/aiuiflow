@@ -26,6 +26,8 @@ app.add_middleware(
 
 # Хранилище для активных таймеров
 active_timers = {}
+# Добавьте глобальную переменную для хранения workflow после других глобальных переменных (примерно строка 30)
+saved_workflows = {}
 
 # Модели данных
 class NodeConfig(BaseModel):
@@ -65,6 +67,12 @@ class ExecutionResult(BaseModel):
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     logs: List[Dict[str, Any]] = []
+
+# Добавьте эту модель данных после существующих моделей (примерно строка 50-60)
+class WorkflowSaveRequest(BaseModel):
+    name: str
+    nodes: List[Node]
+    connections: List[Connection]
 
 # GigaChat API класс
 class GigaChatAPI:
@@ -493,21 +501,37 @@ class NodeExecutors:
             timezone = config.get('timezone', 'UTC')
 
             logger.info(f"⏰ Timer нода выполнена: интервал {interval} минут, часовой пояс {timezone}")
-            # Для демонстрации просто возвращаем результат сразу
-            current_time = datetime.now()
-            next_execution = current_time + timedelta(minutes=interval)
             
             # Проверяем, существует ли уже таймер для этой ноды
             timer_id = f"timer_{node.id}"
             
+            # Получаем ID текущего workflow из имени
+            workflow_id = None
+            for wf_id, wf_data in saved_workflows.items():
+                if any(n.id == node.id for n in wf_data["nodes"]):
+                    workflow_id = wf_id
+                    break
+            
+            if not workflow_id:
+                logger.warning(f"⚠️ Workflow для ноды {node.id} не найден. Таймер может работать некорректно.")
+            
             # Если это первое выполнение, создаем новый таймер
             if timer_id not in active_timers:
-                # Сохраняем информацию о workflow для последующих запусков
-                workflow_info = {
-                    "nodes": [node],  # Начинаем с текущей ноды
-                    "connections": [],  # Будет заполнено позже
-                    "startNodeId": node.id
-                }
+                # Используем сохраненный workflow или создаем минимальный
+                workflow_info = None
+                if workflow_id and workflow_id in saved_workflows:
+                    workflow_info = {
+                        "nodes": saved_workflows[workflow_id]["nodes"],
+                        "connections": saved_workflows[workflow_id]["connections"],
+                        "startNodeId": node.id
+                    }
+                else:
+                    # Минимальный workflow с текущей нодой
+                    workflow_info = {
+                        "nodes": [node],
+                        "connections": [],
+                        "startNodeId": node.id
+                    }
                 
                 # Создаем таймер
                 await create_timer(timer_id, node.id, interval, workflow_info)
@@ -519,6 +543,9 @@ class NodeExecutors:
                 logger.info(f"🕒 Обновлен таймер {timer_id} с новым интервалом {interval} минут")
             
             # Формируем выходные данные для следующих нод
+            current_time = datetime.now()
+            next_execution = current_time + timedelta(minutes=interval)
+            
             return {
                 "success": True,
                 "message": f"Timer triggered at {current_time.isoformat()}",
@@ -537,6 +564,7 @@ class NodeExecutors:
         except Exception as e:
             logger.error(f"❌ Ошибка выполнения Timer ноды: {str(e)}")
             raise Exception(f"Timer execution failed: {str(e)}")
+
 
 # Глобальный экземпляр исполнителей
 executors = NodeExecutors()
@@ -608,7 +636,39 @@ async def execute_node(
                 "level": "error"
             }]
         )
-
+# Добавьте этот эндпоинт после других эндпоинтов (примерно строка 600-650)
+@app.post("/save-workflow")
+async def save_workflow(request: WorkflowSaveRequest):
+    """Сохраняет workflow на сервере"""
+    try:
+        workflow_id = request.name.lower().replace(" ", "_")
+        
+        # Сохраняем workflow в памяти
+        saved_workflows[workflow_id] = {
+            "name": request.name,
+            "nodes": request.nodes,
+            "connections": request.connections,
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        # Можно также сохранить на диск для персистентности
+        # with open(f"workflows/{workflow_id}.json", "w") as f:
+        #     json.dump(saved_workflows[workflow_id], f)
+        
+        logger.info(f"✅ Workflow '{request.name}' сохранен успешно")
+        
+        return {
+            "success": True,
+            "workflow_id": workflow_id,
+            "message": f"Workflow '{request.name}' saved successfully"
+        }
+    except Exception as e:
+        logger.error(f"❌ Ошибка сохранения workflow: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+    
 @app.post("/execute-workflow")
 async def execute_workflow(request: WorkflowExecuteRequest):
     """Выполнение полного workflow"""
