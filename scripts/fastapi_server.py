@@ -7,7 +7,7 @@ import uuid
 import json
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -301,20 +301,34 @@ class NodeExecutors:
 
     async def execute_timer(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение Timer ноды"""
-        config = node.data.get('config', {})
-        interval = config.get('interval', 5)
-        timezone = config.get('timezone', 'UTC')
+        try:
+            config = node.data.get('config', {})
+            interval = int(config.get('interval', 5))
+            timezone = config.get('timezone', 'UTC')
 
-        logger.info(f"⏰ Timer выполнен: интервал {interval} минут, часовой пояс {timezone}")
+            logger.info(f"⏰ Timer выполнен: интервал {interval} минут, часовой пояс {timezone}")
 
-        return {
-            "success": True,
-            "message": "Timer executed",
-            "interval": interval,
-            "timezone": timezone,
-            "timestamp": datetime.now().isoformat(),
-            "inputData": input_data
-        }
+            # Для демонстрации просто возвращаем результат сразу
+            current_time = datetime.now()
+            next_execution = current_time + timedelta(minutes=interval)
+            
+            return {
+                "success": True,
+                "message": f"Timer triggered at {current_time.isoformat()}",
+                "interval": interval,
+                "timezone": timezone,
+                "timestamp": current_time.isoformat(),
+                "next_execution": next_execution.isoformat(),
+                "output": {
+                    "text": f"Timer triggered at {current_time.isoformat()}. Next execution at {next_execution.isoformat()}",
+                    "timestamp": current_time.isoformat(),
+                    "interval": interval,
+                    "timezone": timezone
+                }
+            }
+        except Exception as e:
+            logger.error(f"❌ Ошибка выполнения Timer ноды: {str(e)}")
+            raise Exception(f"Timer execution failed: {str(e)}")
 
 # Глобальный экземпляр исполнителей
 executors = NodeExecutors()

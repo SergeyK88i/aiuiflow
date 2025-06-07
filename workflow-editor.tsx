@@ -309,6 +309,9 @@ export default function WorkflowEditor() {
     setExecutionResults({})
 
     try {
+      console.log("🚀 Executing workflow with nodes:", nodes)
+      console.log("🔗 Connections:", connections)
+
       const response = await fetch(`${API_BASE_URL}/execute-workflow`, {
         method: "POST",
         headers: {
@@ -323,10 +326,26 @@ export default function WorkflowEditor() {
       })
 
       const result = await response.json()
+      console.log("📊 Workflow execution result:", result)
 
       if (result.success) {
         // Обновляем результаты
         setExecutionResults(result.result || {})
+
+        // Выводим результаты в консоль для отладки
+        console.log("🔍 Detailed execution results:", result.result)
+        const gigachatNodes = nodes.filter(node => node.type === 'gigachat')
+        gigachatNodes.forEach(node => {
+          if (result.result && result.result[node.id]) {
+            console.log(`🤖 GigaChat node ${node.id} response:`, result.result[node.id])
+            if (result.result[node.id].response) {
+              console.log(`📝 GigaChat response text:`, result.result[node.id].response)
+            }
+            if (result.result[node.id].output && result.result[node.id].output.text) {
+              console.log(`📄 GigaChat output text:`, result.result[node.id].output.text)
+            }
+          }
+        })
 
         // Обновляем логи
         const logs = result.logs || []
