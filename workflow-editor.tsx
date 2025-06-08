@@ -122,6 +122,88 @@ export default function WorkflowEditor() {
     }
   }, [apiStatus])
 
+    // Добавьте новый useEffect для опроса статусов нод
+useEffect(() => {
+  // Проверяем, есть ли активные таймеры и онлайн ли API
+  if (apiStatus !== "online" || timers.length === 0 || isExecuting) {
+    return;
+  }
+  
+  console.log("🔄 Запуск опроса статусов нод (активные таймеры:", timers.length, ")");
+  
+  // Функция для получения статусов нод
+  const fetchNodeStatus = async () => {
+    try {
+      // Получаем ID всех нод в workflow
+      const nodeIds = nodes.map(node => node.id);
+      
+      if (nodeIds.length === 0) return;
+      
+      const response = await fetch(`${API_BASE_URL}/node-status`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(nodeIds),
+      });
+      
+      if (!response.ok) return;
+      
+      const data = await response.json();
+      const results = data.results || {};
+      
+      // Проверяем, есть ли новые результаты
+      const nodeIdsWithResults = Object.keys(results);
+      if (nodeIdsWithResults.length === 0) return;
+      
+      console.log("📊 Получены статусы нод:", results);
+      
+      // Обновляем результаты выполнения
+      setExecutionResults(prev => ({
+        ...prev,
+        ...Object.fromEntries(
+          Object.entries(results).map(([nodeId, data]) => [nodeId, data.result])
+        )
+      }));
+      
+      // Последовательно подсвечиваем ноды
+      nodeIdsWithResults.forEach((nodeId, index) => {
+        setTimeout(() => {
+          setActiveNode(nodeId);
+          
+          // Добавляем запись в логи
+          const nodeInfo = nodes.find(n => n.id === nodeId);
+          setExecutionLogs(prev => [
+            ...prev,
+            {
+              id: `${Date.now()}-${nodeId}`,
+              nodeId: nodeId,
+              status: "success",
+              message: `${nodeInfo?.data.label || 'Node'} executed by timer`,
+              timestamp: new Date(),
+              data: results[nodeId].result,
+            }
+          ]);
+          
+          // Снимаем подсветку через 1 секунду
+          setTimeout(() => setActiveNode(null), 1000);
+        }, index * 1500); // Задержка между подсветкой нод
+      });
+    } catch (error) {
+      console.error("❌ Ошибка при получении статусов нод:", error);
+    }
+  };
+  
+  // Запускаем опрос каждые 3 секунды
+  const intervalId = setInterval(fetchNodeStatus, 3000);
+  
+  // Очищаем интервал при размонтировании
+  return () => {
+    console.log("🛑 Остановка опроса статусов нод");
+    clearInterval(intervalId);
+  };
+}, [apiStatus, timers.length, nodes, isExecuting]);
+
   const loadTimers = async () => {
     if (apiStatus === "offline") return
 

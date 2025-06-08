@@ -28,6 +28,8 @@ app.add_middleware(
 active_timers = {}
 # Добавьте глобальную переменную для хранения workflow после других глобальных переменных (примерно строка 30)
 saved_workflows = {}
+# Добавьте эту глобальную переменную для хранения последних результатов выполнения нод
+node_execution_results = {}
 
 # Модели данных
 class NodeConfig(BaseModel):
@@ -261,6 +263,14 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                     "nodeId": node_id
                 })
                 
+                # Сохраняем результат выполнения ноды таймера
+                global node_execution_results
+                node_execution_results[node_id] = {
+                    "result": timer_result,
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "success"
+                }
+                
                 # Рекурсивная функция для выполнения следующих нод
                 async def execute_next_nodes(current_node_id, input_data):
                     # Находим соединения, исходящие из текущей ноды
@@ -315,6 +325,13 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                                     "nodeId": target_node_id
                                 })
                                 
+                                # Сохраняем результат выполнения ноды
+                                node_execution_results[target_node_id] = {
+                                    "result": result,
+                                    "timestamp": datetime.now().isoformat(),
+                                    "status": "success"
+                                }
+                                
                                 # Рекурсивно выполняем следующие ноды
                                 await execute_next_nodes(target_node_id, result)
                             except Exception as e:
@@ -325,6 +342,13 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                                     "level": "error",
                                     "nodeId": target_node_id
                                 })
+                                
+                                # Сохраняем информацию об ошибке
+                                node_execution_results[target_node_id] = {
+                                    "error": str(e),
+                                    "timestamp": datetime.now().isoformat(),
+                                    "status": "error"
+                                }
                 
                 # Запускаем выполнение следующих нод
                 logger.info(f"🚀 Запускаем выполнение следующих нод после таймера {node_id}")
@@ -344,6 +368,7 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
         # Обновляем статус таймера
         if timer_id in active_timers:
             active_timers[timer_id]["status"] = "error"
+
 
 
 # Исполнители нод
@@ -770,6 +795,27 @@ async def execute_workflow(request: WorkflowExecuteRequest):
                 "level": "error"
             }]
         )
+
+# Добавьте новый эндпоинт для получения статусов нод
+@app.post("/node-status")
+async def get_node_status(node_ids: List[str]):
+    """Получение статуса выполнения нод"""
+    results = {}
+    
+    for node_id in node_ids:
+        if node_id in node_execution_results:
+            # Получаем результат и проверяем, не устарел ли он (не старше 5 минут)
+            result_data = node_execution_results[node_id]
+            timestamp = datetime.fromisoformat(result_data["timestamp"])
+            
+            if datetime.now() - timestamp < timedelta(minutes=5):
+                results[node_id] = result_data
+                
+                # Очищаем результат после отправки, чтобы не отправлять его повторно
+                # при следующем запросе (это предотвратит повторное подсвечивание ноды)
+                del node_execution_results[node_id]
+    
+    return {"results": results}
 
 # Новые эндпоинты для управления таймерами
 
