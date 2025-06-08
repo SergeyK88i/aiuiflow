@@ -440,6 +440,16 @@ useEffect(() => {
       }
     }
   }, [draggedNode, handleMouseMove, handleMouseUp])
+  // Добавьте это состояние в начало компонента
+  const [showExecutionSummary, setShowExecutionSummary] = useState(true);
+
+  // Добавьте этот useEffect для автоматического показа сводки при появлении новых логов
+  useEffect(() => {
+    if (executionLogs.length > 0) {
+      setShowExecutionSummary(true);
+    }
+  }, [executionLogs.length]);
+
 
   const startConnection = (nodeId: string) => {
     setConnecting(nodeId)
@@ -1350,143 +1360,150 @@ useEffect(() => {
           </div>
         </div>
       </div>
-
-      {/* Active Timers Panel */}
-      {timers.length > 0 && (
-        <div className="absolute top-4 left-4 w-80 bg-white border rounded-lg shadow-lg overflow-hidden">
-          <div className="bg-gray-50 px-4 py-2 border-b flex items-center justify-between">
-            <h3 className="font-semibold text-sm flex items-center">
-              <Clock className="w-4 h-4 mr-2" />
-              Active Timers
-            </h3>
-            <Button variant="ghost" size="sm" onClick={loadTimers} className="h-6 w-6 p-0">
-              <RefreshCw className="w-3 h-3" />
-            </Button>
-          </div>
-          <div className="max-h-48 overflow-y-auto">
-            {timers.map((timer) => {
-              const timerNode = nodes.find((n) => n.id === timer.node_id)
-              const nextExecution = new Date(timer.next_execution)
-
-              return (
-                <div key={timer.id} className="p-3 border-b last:border-b-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="font-medium text-sm">
-                      {timerNode?.data.label || `Timer ${timer.id.split("_")[1]}`}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {timer.status === "active" ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => pauseTimer(timer.id)}
-                          title="Pause timer"
-                        >
-                          <Pause className="w-3 h-3" />
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => resumeTimer(timer.id)}
-                          title="Resume timer"
-                        >
-                          <Play className="w-3 h-3" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => executeTimerNow(timer.id)}
-                        title="Execute now"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-red-500"
-                        onClick={() => deleteTimer(timer.id)}
-                        title="Delete timer"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500 flex items-center gap-2">
-                    <span>Every {timer.interval} minutes</span>
-                    {timer.status === "active" && (
-                      <Badge variant="outline" className="text-xs">
-                        <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
-                        Active
-                      </Badge>
-                    )}
-                    {timer.status === "paused" && (
-                      <Badge variant="outline" className="text-xs">
-                        <Pause className="w-3 h-3 mr-1 text-yellow-500" />
-                        Paused
-                      </Badge>
-                    )}
-                    {timer.status === "error" && (
-                      <Badge variant="outline" className="text-xs">
-                        <AlertCircle className="w-3 h-3 mr-1 text-red-500" />
-                        Error
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-xs mt-1">Next run: {nextExecution.toLocaleString()}</div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
+      
       {/* Execution Logs Panel */}
-      {executionLogs.length > 0 && (
-        <div className="absolute bottom-4 right-4 w-96 max-h-64 bg-white border rounded-lg shadow-lg overflow-hidden">
-          <div className="bg-gray-50 px-4 py-2 border-b flex items-center justify-between">
-            <h3 className="font-semibold text-sm">Execution Logs</h3>
-            <Button variant="ghost" size="sm" onClick={() => setExecutionLogs([])} className="h-6 w-6 p-0">
-              ×
-            </Button>
+      <div className="absolute bottom-4 right-4 flex flex-col gap-4">
+        {/* Active Timers Panel */}
+        {timers.length > 0 && (
+          <div className="w-70 ml-auto bg-white border rounded-lg shadow-lg overflow-hidden">
+            <div className="bg-gray-50 px-4 py-2 border-b flex items-center justify-between">
+              <h3 className="font-semibold text-sm flex items-center">
+                <Clock className="w-4 h-4 mr-2" />
+                Active Timers
+              </h3>
+              <Button variant="ghost" size="sm" onClick={loadTimers} className="h-6 w-6 p-0">
+                <RefreshCw className="w-3 h-3" />
+              </Button>
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {timers.map((timer) => {
+                const timerNode = nodes.find((n) => n.id === timer.node_id)
+                const nextExecution = new Date(timer.next_execution)
+
+                return (
+                  <div key={timer.id} className="p-3 border-b last:border-b-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="font-medium text-sm">
+                        {timerNode?.data.label || `Timer ${timer.id.split("_")[1]}`}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {timer.status === "active" ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => pauseTimer(timer.id)}
+                            title="Pause timer"
+                          >
+                            <Pause className="w-3 h-3" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => resumeTimer(timer.id)}
+                            title="Resume timer"
+                          >
+                            <Play className="w-3 h-3" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => executeTimerNow(timer.id)}
+                          title="Execute now"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-red-500"
+                          onClick={() => deleteTimer(timer.id)}
+                          title="Delete timer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-500 flex items-center gap-2">
+                      <span>Every {timer.interval} minutes</span>
+                      {timer.status === "active" && (
+                        <Badge variant="outline" className="text-xs">
+                          <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
+                          Active
+                        </Badge>
+                      )}
+                      {timer.status === "paused" && (
+                        <Badge variant="outline" className="text-xs">
+                          <Pause className="w-3 h-3 mr-1 text-yellow-500" />
+                          Paused
+                        </Badge>
+                      )}
+                      {timer.status === "error" && (
+                        <Badge variant="outline" className="text-xs">
+                          <AlertCircle className="w-3 h-3 mr-1 text-red-500" />
+                          Error
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-xs mt-1">Next run: {nextExecution.toLocaleString()}</div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-          <div className="max-h-48 overflow-y-auto p-2 space-y-1">
-            {executionLogs.map((log) => (
-              <div
-                key={log.id}
-                className={`text-xs p-2 rounded flex items-center gap-2 ${
-                  log.status === "running"
-                    ? "bg-blue-50 text-blue-700"
-                    : log.status === "success"
-                      ? "bg-green-50 text-green-700"
-                      : "bg-red-50 text-red-700"
-                }`}
-              >
+        )}
+
+        {/* Execution Logs */}
+        {executionLogs.length > 0 && (
+          <div className="w-96 max-h-64 bg-white border rounded-lg shadow-lg overflow-hidden">
+            <div className="bg-gray-50 px-4 py-2 border-b flex items-center justify-between">
+              <h3 className="font-semibold text-sm">Execution Logs</h3>
+              <Button variant="ghost" size="sm" onClick={() => setExecutionLogs([])} className="h-6 w-6 p-0">
+                ×
+              </Button>
+            </div>
+            <div className="max-h-48 overflow-y-auto p-2 space-y-1">
+              {executionLogs.map((log) => (
                 <div
-                  className={`w-2 h-2 rounded-full ${
+                  key={log.id}
+                  className={`text-xs p-2 rounded flex items-center gap-2 ${
                     log.status === "running"
-                      ? "bg-blue-500 animate-pulse"
+                      ? "bg-blue-50 text-blue-700"
                       : log.status === "success"
-                        ? "bg-green-500"
-                        : "bg-red-500"
+                        ? "bg-green-50 text-green-700"
+                        : "bg-red-50 text-red-700"
                   }`}
-                />
-                <span className="flex-1">{log.message}</span>
-                <span className="text-gray-500">{log.timestamp.toLocaleTimeString()}</span>
-              </div>
-            ))}
+                >
+                  <div
+                    className={`w-2 h-2 rounded-full ${
+                      log.status === "running"
+                        ? "bg-blue-500 animate-pulse"
+                        : log.status === "success"
+                          ? "bg-green-500"
+                          : "bg-red-500"
+                    }`}
+                  />
+                  <span className="flex-1">{log.message}</span>
+                  <span className="text-gray-500">{log.timestamp.toLocaleTimeString()}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      
+      
       {/* Execution Summary Panel */}
-      {executionLogs.length > 0 && !isExecuting && (
-        <div className="absolute bottom-4 left-4 w-64 bg-white border rounded-lg shadow-lg overflow-hidden">
-          <div className="bg-gray-50 px-4 py-2 border-b">
+      {executionLogs.length > 0 && !isExecuting && showExecutionSummary &&(
+        <div className="w-70 ml-auto max-h-64 bg-white border rounded-lg shadow-lg overflow-hidden">
+          <div className="bg-gray-50 px-4 py-2 border-b flex items-center justify-between">
             <h3 className="font-semibold text-sm">Сводка выполнения</h3>
+          <Button variant="ghost" size="sm" onClick={() => setShowExecutionSummary(false)} className="h-6 w-6 p-0">
+          ×
+          </Button>
           </div>
           <div className="p-3">
             <div className="flex items-center justify-between mb-2">
@@ -1521,7 +1538,8 @@ useEffect(() => {
             </div>
           </div>
         </div>
-      )}
+      )} 
+      </div>
       {/* Results Modal */}
       {selectedResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
