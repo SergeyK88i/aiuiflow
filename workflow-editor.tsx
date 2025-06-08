@@ -90,6 +90,7 @@ export default function WorkflowEditor() {
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">("checking")
   const [debugInfo, setDebugInfo] = useState<string>("")
+  const [selectedResult, setSelectedResult] = useState<{nodeId: string, data: any} | null>(null);
 
   // Состояние для таймеров
   const [timers, setTimers] = useState<TimerData[]>([])
@@ -390,7 +391,30 @@ export default function WorkflowEditor() {
     const endY = targetNode.position.y + 40
 
     const midX = (startX + endX) / 2
-
+    // Определяем статус соединения
+    const sourceExecuted = !!executionResults[connection.source]
+    const targetExecuted = !!executionResults[connection.target]
+    const sourceHasError = executionLogs.some(log => log.nodeId === connection.source && log.status === "error")
+    const targetIsActive = activeNode === connection.target
+    
+    // Определяем стиль соединения
+    let strokeColor = "#6366f1" // Стандартный цвет
+    let strokeWidth = "2"
+    let dashArray = ""
+    
+    if (sourceExecuted && !sourceHasError) {
+      if (targetIsActive) {
+        // Активное соединение (данные передаются)
+        strokeColor = "#16a34a" // Зеленый
+        strokeWidth = "3"
+      } else if (targetExecuted) {
+        // Успешно выполненное соединение
+        strokeColor = "#16a34a" // Зеленый
+      }
+    } else if (sourceHasError) {
+      // Ошибка в исходной ноде
+      strokeColor = "#dc2626" // Красный
+    }
     return (
       <path
         key={connection.id}
@@ -1096,7 +1120,16 @@ export default function WorkflowEditor() {
               return (
                 <div
                   key={node.id}
-                  className={`absolute cursor-move select-none ${selectedNode?.id === node.id ? "ring-2 ring-blue-500" : ""} ${activeNode === node.id ? "ring-2 ring-green-500 animate-pulse" : ""} ${executionResults[node.id] ? "ring-1 ring-green-300" : ""}`}
+                  // Обновите класс для нод
+                  className={`absolute cursor-move select-none 
+                    ${selectedNode?.id === node.id ? "ring-2 ring-blue-500" : ""} 
+                    ${activeNode === node.id ? "ring-2 ring-green-500 animate-pulse" : ""} 
+                    ${executionResults[node.id] ? 
+                      executionLogs.some(log => log.nodeId === node.id && log.status === "error") ? 
+                        "ring-2 ring-red-500" : 
+                        "ring-2 ring-green-500" : 
+                      ""}`}
+
                   style={{
                     left: node.position.x,
                     top: node.position.y,
@@ -1104,8 +1137,17 @@ export default function WorkflowEditor() {
                     transition: draggedNode?.id === node.id ? "none" : "transform 0.1s",
                   }}
                   onMouseDown={(e) => handleMouseDown(e, node)}
-                  onClick={() => setSelectedNode(node)}
-                >
+                  onClick={(e) => {
+                    setSelectedNode(node);
+                    // Если есть результаты выполнения и был сделан двойной клик, показываем результаты
+                    if (executionResults[node.id] && e.detail === 2) {
+                      setSelectedResult({
+                        nodeId: node.id,
+                        data: executionResults[node.id]
+                      });
+                    }
+                  }}
+                  >
                   <Card className="w-48 shadow-lg hover:shadow-xl transition-shadow">
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
@@ -1116,6 +1158,15 @@ export default function WorkflowEditor() {
                             <IconComponent className="w-4 h-4 text-white" />
                           </div>
                           <CardTitle className="text-sm">{node.data.label}</CardTitle>
+                          {executionResults[node.id] && (
+                            <div className="ml-auto">
+                              {executionLogs.some(log => log.nodeId === node.id && log.status === "error") ? (
+                                <AlertCircle className="w-4 h-4 text-red-500" />
+                              ) : (
+                                <CheckCircle className="w-4 h-4 text-green-500" />
+                              )}
+                            </div>
+                          )}
                         </div>
                         <Button
                           variant="ghost"
@@ -1171,6 +1222,27 @@ export default function WorkflowEditor() {
                           </Button>
                         )}
                       </div>
+                      {executionResults[node.id] && (
+                        <div className="mt-2 flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedResult({
+                                nodeId: node.id,
+                                data: executionResults[node.id]
+                              });
+                            }}
+                            title="Просмотр результатов"
+                          >
+                            <ExternalLink className="w-3 h-3 mr-1" />
+                            Результаты
+                          </Button>
+                        </div>
+                      )}
+
                     </CardContent>
                   </Card>
                 </div>
@@ -1328,6 +1400,75 @@ export default function WorkflowEditor() {
           </div>
         </div>
       )}
+      {/* Execution Summary Panel */}
+      {executionLogs.length > 0 && !isExecuting && (
+        <div className="absolute bottom-4 left-4 w-64 bg-white border rounded-lg shadow-lg overflow-hidden">
+          <div className="bg-gray-50 px-4 py-2 border-b">
+            <h3 className="font-semibold text-sm">Сводка выполнения</h3>
+          </div>
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm">Всего нод:</span>
+              <Badge>{nodes.length}</Badge>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm">Выполнено:</span>
+              <Badge variant="outline" className="bg-green-50 text-green-700">
+                {Object.keys(executionResults).length}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm">Ошибки:</span>
+              <Badge variant="outline" className="bg-red-50 text-red-700">
+                {executionLogs.filter(log => log.status === "error" && log.nodeId !== "system").length}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Время выполнения:</span>
+              <span className="text-xs">
+                {executionLogs.length > 0 ? 
+                  (() => {
+                    const timestamps = executionLogs.map(log => log.timestamp.getTime());
+                    if (timestamps.length < 2) return "N/A";
+                    const start = Math.min(...timestamps);
+                    const end = Math.max(...timestamps);
+                    return `${((end - start) / 1000).toFixed(1)} сек`;
+                  })() : "N/A"
+                }
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Results Modal */}
+      {selectedResult && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-3/4 max-w-3xl max-h-[80vh] overflow-hidden">
+            <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
+              <h3 className="font-semibold">
+                Результаты выполнения: {nodes.find(n => n.id === selectedResult.nodeId)?.data.label}
+              </h3>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedResult(null)}>×</Button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[calc(80vh-60px)]">
+              {selectedResult.data.output?.text ? (
+                <div className="mb-4">
+                  <h4 className="font-medium mb-2">Текстовый результат:</h4>
+                  <div className="bg-gray-50 p-3 rounded border whitespace-pre-wrap">
+                    {selectedResult.data.output.text}
+                  </div>
+                </div>
+              ) : null}
+              
+              <h4 className="font-medium mb-2">Полные данные:</h4>
+              <pre className="bg-gray-50 p-3 rounded border overflow-x-auto text-xs">
+                {JSON.stringify(selectedResult.data, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
