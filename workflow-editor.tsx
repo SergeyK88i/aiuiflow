@@ -400,7 +400,7 @@ useEffect(() => {
       gigachat: {
         role: "assistant", // Добавляем роль по умолчанию
         authToken:
-          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjZiZjlhMjBiLTQ0NDktNDZiYS1iMDJhLTdjNmI1ZTM3YzBkYQ==",
+          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjZiZjlhMjBiLTQ0NDktNDZiYS1",
         systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
         userMessage: "Привет! Расскажи что-нибудь интересное о программировании.",
         clearHistory: false,
