@@ -63,6 +63,51 @@ const nodeTypes = [
   { type: "email", label: "Send Email", icon: Mail, color: "bg-red-500", canStart: false },
   { type: "database", label: "Database Query", icon: Database, color: "bg-purple-500", canStart: false },
 ]
+// Добавьте после импортов (примерно строка 30)
+const gigaChatRoles = [
+  {
+    id: "assistant",
+    name: "Полезный ассистент",
+    systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
+    userMessage: "Привет! Расскажи что-нибудь интересное о программировании."
+  },
+  {
+    id: "translator",
+    name: "Переводчик",
+    systemMessage: "Ты профессиональный переводчик. Переводи тексты точно, сохраняя смысл и стиль оригинала.",
+    userMessage: "Переведи на английский: Искусственный интеллект меняет мир."
+  },
+  {
+    id: "coder",
+    name: "Программист",
+    systemMessage: "Ты опытный программист. Пиши чистый, эффективный код с комментариями. Объясняй решения.",
+    userMessage: "Напиши функцию на Python для сортировки списка."
+  },
+  {
+    id: "analyst",
+    name: "Аналитик данных",
+    systemMessage: "Ты аналитик данных. Анализируй информацию, находи закономерности, делай выводы на основе фактов.",
+    userMessage: "Проанализируй тренды в области ИИ за последний год."
+  },
+  {
+    id: "creative",
+    name: "Креативный писатель",
+    systemMessage: "Ты креативный писатель. Создавай интересные истории, используй яркие образы и метафоры.",
+    userMessage: "Придумай короткую историю про робота, который мечтает стать поваром."
+  },
+  {
+    id: "teacher",
+    name: "Учитель",
+    systemMessage: "Ты терпеливый учитель. Объясняй сложные концепции простым языком, используй примеры и аналогии.",
+    userMessage: "Объясни, как работает нейронная сеть, простыми словами."
+  },
+  {
+    id: "custom",
+    name: "Своя роль",
+    systemMessage: "",
+    userMessage: ""
+  }
+];
 
 export default function WorkflowEditor() {
   const [nodes, setNodes] = useState<Node[]>([])
@@ -353,8 +398,9 @@ useEffect(() => {
 
     const defaultConfigs = {
       gigachat: {
+        role: "assistant", // Добавляем роль по умолчанию
         authToken:
-          "MmMzZDA5OGMtODIyNS00MGJlLWJhOGItMzRhOTgyY2M0YjBhOjk3NGQ0ZTA3LWQ3MDUtNDhhNC1iYjFlLTQ0N2Y2ZmJkMWM4Mg==",
+          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjZiZjlhMjBiLTQ0NDktNDZiYS1iMDJhLTdjNmI1ZTM3YzBkYQ==",
         systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
         userMessage: "Привет! Расскажи что-нибудь интересное о программировании.",
         clearHistory: false,
@@ -924,52 +970,128 @@ useEffect(() => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {selectedNode.type === "gigachat" && (
-                    <>
-                      <div>
-                        <Label htmlFor="authToken">Auth Token</Label>
-                        <Input
-                          id="authToken"
-                          type="password"
-                          placeholder="Введите токен авторизации"
-                          value={selectedNode.data.config.authToken || ""}
-                          onChange={(e) => updateNodeConfig("authToken", e.target.value)}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Base64 токен для доступа к GigaChat API</p>
-                      </div>
-                      <div>
-                        <Label htmlFor="systemMessage">System Message</Label>
-                        <Textarea
-                          id="systemMessage"
-                          placeholder="Ты полезный ассистент..."
-                          value={selectedNode.data.config.systemMessage || ""}
-                          onChange={(e) => updateNodeConfig("systemMessage", e.target.value)}
-                          rows={3}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Системное сообщение для настройки поведения AI</p>
-                      </div>
-                      <div>
-                        <Label htmlFor="userMessage">User Message</Label>
-                        <Textarea
-                          id="userMessage"
-                          placeholder="Введите ваш вопрос..."
-                          value={selectedNode.data.config.userMessage || ""}
-                          onChange={(e) => updateNodeConfig("userMessage", e.target.value)}
-                          rows={3}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Сообщение пользователя для отправки в GigaChat</p>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          id="clearHistory"
-                          checked={selectedNode.data.config.clearHistory || false}
-                          onCheckedChange={(checked) => updateNodeConfig("clearHistory", checked)}
-                        />
-                        <Label htmlFor="clearHistory">Clear History</Label>
-                      </div>
-                      <p className="text-xs text-gray-500">Очистить историю диалога перед отправкой запроса</p>
-                    </>
-                  )}
+                {selectedNode.type === "gigachat" && (
+                  <>
+                    <div>
+                      <Label htmlFor="role">Роль AI</Label>
+                      <Select
+                        value={selectedNode.data.config.role || "assistant"}
+                        onValueChange={(value) => {
+                          const role = gigaChatRoles.find(r => r.id === value);
+                          if (role && value !== "custom") {
+                            // Обновляем все поля сразу
+                            setNodes((prev) =>
+                              prev.map((node) =>
+                                node.id === selectedNode.id
+                                  ? {
+                                      ...node,
+                                      data: {
+                                        ...node.data,
+                                        config: {
+                                          ...node.data.config,
+                                          role: value,
+                                          systemMessage: role.systemMessage,
+                                          userMessage: role.userMessage
+                                        }
+                                      }
+                                    }
+                                  : node
+                              )
+                            );
+                            setSelectedNode((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    data: {
+                                      ...prev.data,
+                                      config: {
+                                        ...prev.data.config,
+                                        role: value,
+                                        systemMessage: role.systemMessage,
+                                        userMessage: role.userMessage
+                                      }
+                                    }
+                                  }
+                                : null
+                            );
+                          } else {
+                            updateNodeConfig("role", value);
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Выберите роль" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {gigaChatRoles.map((role) => (
+                            <SelectItem key={role.id} value={role.id}>
+                              {role.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Выберите готовую роль или создайте свою
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="authToken">Auth Token</Label>
+                      <Input
+                        id="authToken"
+                        type="password"
+                        placeholder="Введите токен авторизации"
+                        value={selectedNode.data.config.authToken || ""}
+                        onChange={(e) => updateNodeConfig("authToken", e.target.value)}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Base64 токен для доступа к GigaChat API</p>
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="systemMessage">System Message</Label>
+                      <Textarea
+                        id="systemMessage"
+                        placeholder="Ты полезный ассистент..."
+                        value={selectedNode.data.config.systemMessage || ""}
+                        onChange={(e) => updateNodeConfig("systemMessage", e.target.value)}
+                        rows={3}
+                        disabled={selectedNode.data.config.role && selectedNode.data.config.role !== "custom"}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        {selectedNode.data.config.role && selectedNode.data.config.role !== "custom" 
+                          ? "Автоматически заполнено для выбранной роли" 
+                          : "Системное сообщение для настройки поведения AI"}
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="userMessage">User Message</Label>
+                      <Textarea
+                        id="userMessage"
+                        placeholder="Введите ваш вопрос..."
+                        value={selectedNode.data.config.userMessage || ""}
+                        onChange={(e) => updateNodeConfig("userMessage", e.target.value)}
+                        rows={3}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        {selectedNode.data.config.role && selectedNode.data.config.role !== "custom" 
+                          ? "Можете изменить пример сообщения" 
+                          : "Сообщение пользователя для отправки в GigaChat"}
+                      </p>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="clearHistory"
+                        checked={selectedNode.data.config.clearHistory || false}
+                        onCheckedChange={(checked) => updateNodeConfig("clearHistory", checked)}
+                      />
+                      <Label htmlFor="clearHistory">Clear History</Label>
+                    </div>
+                    <p className="text-xs text-gray-500">Очистить историю диалога перед отправкой запроса</p>
+                  </>
+                )}
+
                   {selectedNode.type === "webhook" && (
                     <>
                       <div>
