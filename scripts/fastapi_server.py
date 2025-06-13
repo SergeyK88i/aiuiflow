@@ -302,6 +302,19 @@ class NodeExecutors:
         user_message = config.get('userMessage', '')
         clear_history = config.get('clearHistory', False)
 
+        # ДОБАВЛЯЕМ ЗАМЕНУ ШАБЛОНОВ
+        if input_data and 'output' in input_data:
+            # Заменяем {{input.output.text}} на реальное значение
+            if '{{input.output.text}}' in user_message:
+                replacement_text = input_data['output'].get('text', '')
+                user_message = user_message.replace('{{input.output.text}}', replacement_text)
+                logger.info(f"🔄 Заменен шаблон: {{input.output.text}} -> {replacement_text}")
+            
+            # Можно добавить другие шаблоны
+            if '{{input.output.question}}' in user_message:
+                replacement_text = input_data['output'].get('question', '')
+                user_message = user_message.replace('{{input.output.question}}', replacement_text)
+
         # ДОБАВЛЯЕМ ЛОГИРОВАНИЕ ВХОДНЫХ ДАННЫХ
         logger.info(f"📥 Входные данные от предыдущей ноды: {json.dumps(input_data, ensure_ascii=False, indent=2)[:500]}...")
 
