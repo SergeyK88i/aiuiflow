@@ -145,6 +145,7 @@ class GigaChatAPI:
                 self.conversation_history.append({"role": "assistant", "content": assistant_response})
                 
                 logger.info(f"✅ Получен ответ от GigaChat")
+                logger.info(f"🤖 ОТВЕТ: {assistant_response}")
                 return {
                     "success": True,
                     "response": assistant_response,
@@ -300,6 +301,9 @@ class NodeExecutors:
         system_message = config.get('systemMessage', 'Ты полезный ассистент')
         user_message = config.get('userMessage', '')
         clear_history = config.get('clearHistory', False)
+
+        # ДОБАВЛЯЕМ ЛОГИРОВАНИЕ ВХОДНЫХ ДАННЫХ
+        logger.info(f"📥 Входные данные от предыдущей ноды: {json.dumps(input_data, ensure_ascii=False, indent=2)[:500]}...")
 
         logger.info(f"Auth token: {auth_token is not None}")
         logger.info(f"Role: {role}")  # Логируем роль
@@ -503,6 +507,91 @@ class NodeExecutors:
         except Exception as e:
             logger.error(f"❌ Ошибка выполнения Timer ноды: {str(e)}")
             raise Exception(f"Timer execution failed: {str(e)}")
+    async def execute_join(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Выполнение Join/Merge ноды"""
+        config = node.data.get('config', {})
+        wait_for_all = config.get('waitForAll', True)
+        merge_strategy = config.get('mergeStrategy', 'combine_text')
+        separator = config.get('separator', '\n\n---\n\n').replace('\\n', '\n')
+        
+        logger.info(f"🔀 Выполнение Join/Merge ноды: {node.id}")
+        logger.info(f"📥 Стратегия: {merge_strategy}")
+        
+        # input_data должен содержать словарь inputs с данными от всех источников
+        inputs = input_data.get('inputs', {})
+        
+        if not inputs:
+            raise Exception("Join node requires input data from at least one source")
+        
+        logger.info(f"📊 Получены данные от {len(inputs)} источников: {list(inputs.keys())}")
+        
+        result = {}
+        
+        if merge_strategy == 'combine_text':
+            # Объединяем все тексты
+            texts = []
+            for i, (source_id, data) in enumerate(inputs.items()):
+                # Извлекаем текст из разных возможных мест
+                text = ""
+                if isinstance(data, dict):
+                    if 'output' in data and 'text' in data['output']:
+                        text = data['output']['text']
+                    elif 'response' in data:
+                        text = data['response']
+                    elif 'text' in data:
+                        text = data['text']
+                    else:
+                        # Если не нашли текст, конвертируем в строку
+                        text = json.dumps(data, ensure_ascii=False, indent=2)
+                else:
+                    text = str(data)
+                
+                texts.append(f"=== Источник {i+1} ({source_id}) ===\n{text}")
+            
+            combined_text = separator.join(texts)
+            
+            result = {
+                'output': {
+                    'text': combined_text,
+                    'source_count': len(inputs),
+                    'sources': list(inputs.keys())
+                },
+                'success': True
+            }
+            
+            logger.info(f"✅ Объединено {len(texts)} текстов")
+            
+        elif merge_strategy == 'merge_json':
+            # Объединяем все данные в единый JSON
+            merged_data = {
+                'sources': {},
+                'metadata': {
+                    'source_count': len(inputs),
+                    'merge_time': datetime.now().isoformat(),
+                    'source_ids': list(inputs.keys())
+                }
+            }
+            
+            # Добавляем данные от каждого источника
+            for source_id, data in inputs.items():
+                merged_data['sources'][source_id] = data
+            
+            result = {
+                'output': {
+                    'text': json.dumps(merged_data, ensure_ascii=False, indent=2),
+                    'json': merged_data,
+                    'source_count': len(inputs),
+                    'sources': list(inputs.keys())
+                },
+                'success': True
+            }
+            
+            logger.info(f"✅ Объединены данные в JSON от {len(inputs)} источников")
+        
+        else:
+            raise Exception(f"Unknown merge strategy: {merge_strategy}")
+        
+        return result
 
 
 # Глобальный экземпляр исполнителей
@@ -544,7 +633,8 @@ async def execute_node(
             'email': executors.execute_email,
             'database': executors.execute_database,
             'webhook': executors.execute_webhook,
-            'timer': executors.execute_timer
+            'timer': executors.execute_timer,
+            'join': executors.execute_join  # Добавьте эту строку
         }
 
         executor = executor_map.get(node_type)
@@ -610,14 +700,20 @@ async def save_workflow(request: WorkflowSaveRequest):
 
 async def execute_workflow_internal(request: WorkflowExecuteRequest):
     """Внутренняя функция выполнения workflow (без HTTP обертки)"""
+    logs = []
     try:
         logger.info(f"🚀 Запуск workflow с {len(request.nodes)} нодами")
+        
+        # Детальное логирование нод и соединений (из старой версии)
         for node in request.nodes:
             logger.info(f"📋 Нода {node.id} типа {node.type}: {node.data.get('label', 'Без метки')}")
         
         logger.info(f"🔗 Соединения: {len(request.connections)}")
         for conn in request.connections:
             logger.info(f"🔗 Соединение: {conn.source} -> {conn.target}")
+        
+        # Хранилище для накопления данных для join нод
+        join_node_data = {}
         
         # Находим стартовую ноду
         start_node = None
@@ -628,10 +724,12 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
             # Ищем ноду без входящих соединений
             node_ids_with_inputs = {conn.target for conn in request.connections}
             startable_types = ['gigachat', 'webhook', 'timer']
+            
             start_candidates = [
                 n for n in request.nodes 
                 if n.type in startable_types and n.id not in node_ids_with_inputs
             ]
+            
             if start_candidates:
                 start_node = start_candidates[0]
                 logger.info(f"🔍 Найдена стартовая нода без входящих соединений: {start_node.id}")
@@ -655,13 +753,48 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
 
         # Выполняем workflow
         results = {}
-        logs = []
         
-        async def execute_node_recursive(node_id: str, input_data: Dict[str, Any] = None):
+        
+        async def execute_node_recursive(node_id: str, input_data: Dict[str, Any] = None, source_node_id: str = None):
             node = next((n for n in request.nodes if n.id == node_id), None)
             if not node:
                 return None
 
+            # Проверяем, является ли это join нодой с множественными входами
+            incoming_connections = [c for c in request.connections if c.target == node_id]
+            
+            if node.type == 'join' and len(incoming_connections) > 1:
+                # Это join нода - накапливаем данные
+                if node_id not in join_node_data:
+                    join_node_data[node_id] = {
+                        'expected_sources': set(c.source for c in incoming_connections),
+                        'received_data': {}
+                    }
+                
+                # Сохраняем данные от текущего источника
+                if source_node_id:
+                    join_node_data[node_id]['received_data'][source_node_id] = input_data
+                    logger.info(f"🔀 Join нода {node_id} получила данные от {source_node_id}")
+                    logger.info(f"📊 Ожидается: {join_node_data[node_id]['expected_sources']}")
+                    logger.info(f"📊 Получено от: {set(join_node_data[node_id]['received_data'].keys())}")
+                
+                # Проверяем, получили ли мы данные от всех источников
+                received_sources = set(join_node_data[node_id]['received_data'].keys())
+                expected_sources = join_node_data[node_id]['expected_sources']
+                
+                if node.data.get('config', {}).get('waitForAll', True):
+                    if received_sources != expected_sources:
+                        # Еще не все данные получены
+                        logger.info(f"⏳ Join нода {node_id} ждет данные от {expected_sources - received_sources}")
+                        return None
+                
+                # Все данные получены или не ждем всех - выполняем join
+                input_data = {'inputs': join_node_data[node_id]['received_data']}
+                
+                # Очищаем временные данные
+                del join_node_data[node_id]
+            
+            # Логируем выполнение
             logs.append({
                 "message": f"Executing {node.data.get('label', node.type)}...",
                 "timestamp": datetime.now().isoformat(),
@@ -675,7 +808,8 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
                 'email': executors.execute_email,
                 'database': executors.execute_database,
                 'webhook': executors.execute_webhook,
-                'timer': executors.execute_timer
+                'timer': executors.execute_timer,
+                'join': executors.execute_join
             }
 
             executor = executor_map.get(node.type)
@@ -693,7 +827,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
                 # Находим следующие ноды
                 next_connections = [c for c in request.connections if c.source == node_id]
                 for connection in next_connections:
-                    await execute_node_recursive(connection.target, result)
+                    await execute_node_recursive(connection.target, result, node_id)
 
                 return result
             else:
@@ -719,6 +853,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
                 "level": "error"
             }]
         )
+
 
 @app.post("/execute-workflow")
 async def execute_workflow(request: WorkflowExecuteRequest):

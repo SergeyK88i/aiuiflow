@@ -29,6 +29,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { GitMerge } from "lucide-react" // Добавьте к существующим импортам
+
 
 interface Node {
   id: string
@@ -62,6 +64,7 @@ const nodeTypes = [
   { type: "timer", label: "Timer Trigger", icon: Timer, color: "bg-blue-500", canStart: true },
   { type: "email", label: "Send Email", icon: Mail, color: "bg-red-500", canStart: false },
   { type: "database", label: "Database Query", icon: Database, color: "bg-purple-500", canStart: false },
+  { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false }, // Новая строка
 ]
 // Добавьте после импортов (примерно строка 30)
 const gigaChatRoles = [
@@ -400,7 +403,7 @@ useEffect(() => {
       gigachat: {
         role: "assistant", // Добавляем роль по умолчанию
         authToken:
-          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjZiZjlhMjBiLTQ0NDktNDZiYS1",
+          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4M",
         systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
         userMessage: "Привет! Расскажи что-нибудь интересное о программировании.",
         clearHistory: false,
@@ -422,6 +425,11 @@ useEffect(() => {
       timer: {
         interval: 5,
         timezone: "UTC",
+      },
+      join: {
+        waitForAll: true,
+        mergeStrategy: "combine_text",
+        separator: "\n\n---\n\n",
       },
     }
 
@@ -1300,6 +1308,51 @@ useEffect(() => {
                       )}
                     </>
                   )}
+                  {selectedNode.type === "join" && (
+                    <>
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="waitForAll"
+                          checked={selectedNode.data.config.waitForAll ?? true}
+                          onCheckedChange={(checked) => updateNodeConfig("waitForAll", checked)}
+                        />
+                        <Label htmlFor="waitForAll">Wait for all inputs</Label>
+                      </div>
+                      <p className="text-xs text-gray-500">Ждать данные от всех входящих соединений</p>
+                      
+                      <div>
+                        <Label htmlFor="mergeStrategy">Merge Strategy</Label>
+                        <Select
+                          value={selectedNode.data.config.mergeStrategy || "combine_text"}
+                          onValueChange={(value) => updateNodeConfig("mergeStrategy", value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select strategy" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="combine_text">Combine Text (объединить тексты)</SelectItem>
+                            <SelectItem value="merge_json">Merge JSON (объединить в JSON)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      {selectedNode.data.config.mergeStrategy === "combine_text" && (
+                        <div>
+                          <Label htmlFor="separator">Text Separator</Label>
+                          <Input
+                            id="separator"
+                            placeholder="\n\n---\n\n"
+                            value={selectedNode.data.config.separator || ""}
+                            onChange={(e) => updateNodeConfig("separator", e.target.value)}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Разделитель между текстами (используйте \n для новой строки)
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
                 </CardContent>
               </Card>
             </div>
