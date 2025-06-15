@@ -8,6 +8,7 @@ import json
 import asyncio
 import logging
 from datetime import datetime, timedelta
+import re
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -283,11 +284,44 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
 
 
 
+def replace_templates(text: str, data: Dict[str, Any]) -> str:
+        """Универсальная замена шаблонов вида {{path.to.value}}"""
+        
+        def get_nested_value(obj: Dict[str, Any], path: str) -> Any:
+            """Получает значение по пути типа 'input.output.text'"""
+            keys = path.split('.')
+            current = obj
+            
+            for key in keys:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    return f"{{{{ {path} }}}}"  # Возвращаем исходный шаблон если путь не найден
+            
+            return str(current)
+        
+        # Находим все шаблоны вида {{что-то}}
+        pattern = r'\{\{([^}]+)\}\}'
+        
+        def replacer(match):
+            path = match.group(1).strip()
+            
+            # Если путь начинается с 'input.', убираем это
+            if path.startswith('input.'):
+                path = path[6:]  # Убираем 'input.'
+            
+            value = get_nested_value(data, path)
+            logger.info(f"🔄 Замена шаблона: {{{{{match.group(1)}}}}} -> {value}")
+            return value
+        
+        return re.sub(pattern, replacer, text)
 
 # Исполнители нод
 class NodeExecutors:
     def __init__(self):
         self.gigachat_api = GigaChatAPI()
+    
+    
 
     async def execute_gigachat(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение GigaChat ноды"""
@@ -302,21 +336,21 @@ class NodeExecutors:
         user_message = config.get('userMessage', '')
         clear_history = config.get('clearHistory', False)
 
-        # ДОБАВЛЯЕМ ЗАМЕНУ ШАБЛОНОВ
-        if input_data and 'output' in input_data:
-            # Заменяем {{input.output.text}} на реальное значение
-            if '{{input.output.text}}' in user_message:
-                replacement_text = input_data['output'].get('text', '')
-                user_message = user_message.replace('{{input.output.text}}', replacement_text)
-                logger.info(f"🔄 Заменен шаблон: {{input.output.text}} -> {replacement_text}")
-            
-            # Можно добавить другие шаблоны
-            if '{{input.output.question}}' in user_message:
-                replacement_text = input_data['output'].get('question', '')
-                user_message = user_message.replace('{{input.output.question}}', replacement_text)
+        
 
         # ДОБАВЛЯЕМ ЛОГИРОВАНИЕ ВХОДНЫХ ДАННЫХ
         logger.info(f"📥 Входные данные от предыдущей ноды: {json.dumps(input_data, ensure_ascii=False, indent=2)[:500]}...")
+        # УНИВЕРСАЛЬНАЯ ЗАМЕНА ШАБЛОНОВ
+        if input_data:
+            original_message = user_message
+            user_message = replace_templates(user_message, input_data)
+            
+            # Также заменяем шаблоны в system_message если есть
+            system_message = replace_templates(system_message, input_data)
+            
+            if original_message != user_message:
+                logger.info(f"📝 Сообщение до замены: {original_message}")
+                logger.info(f"📝 Сообщение после замены: {user_message}")
 
         logger.info(f"Auth token: {auth_token is not None}")
         logger.info(f"Role: {role}")  # Логируем роль
