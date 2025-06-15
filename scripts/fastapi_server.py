@@ -1,3 +1,4 @@
+import aiohttp
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -53,6 +54,8 @@ class NodeConfig(BaseModel):
     separator: Optional[str] = "\n\n---\n\n"
     # Для Request Iterator ноды
     baseUrl: Optional[str] = None
+    executionMode: Optional[str] = "sequential" # New: 'sequential' or 'parallel'
+    commonHeaders: Optional[str] = None # New: JSON string for common headers
 
 class Node(BaseModel):
     id: str
@@ -321,12 +324,253 @@ def replace_templates(text: str, data: Dict[str, Any]) -> str:
         
         return re.sub(pattern, replacer, text)
 
+# Add this helper function within the NodeExecutors class or globally if preferred
+# For simplicity, let's add it before the NodeExecutors class or as a static method
+
+async def _make_single_http_request(
+    session: aiohttp.ClientSession,
+    method: str,
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """
+    Makes a single HTTP request and returns a structured response or mock on error.
+    """
+    request_details = {
+        "request_url": url,
+        "request_method": method,
+        "request_params": params if method == "GET" else None,
+        "request_body": json_body if method in ["POST", "PUT", "PATCH"] else None,
+        "request_headers": headers,
+    }
+    try:
+        logger.info(f"🌍 Making {method} request to {url} with params={params}, body={json_body}, headers={headers}")
+        async with session.request(
+            method,
+            url,
+            params=params if method == "GET" else None, # Query params for GET
+            json=json_body if method in ["POST", "PUT", "PATCH"] else None, # JSON body for POST/PUT etc.
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10), # 10-second timeout
+            ssl=False
+        ) as response:
+            response_data = None
+            try:
+                # Try to parse as JSON, but handle cases where it might not be
+                if response.content_type == 'application/json':
+                    response_data = await response.json()
+                else:
+                    response_data = await response.text()
+            except (aiohttp.ContentTypeError, json.JSONDecodeError) as json_err:
+                logger.warning(f"⚠️ Could not parse JSON response from {url}: {json_err}. Reading as text.")
+                response_data = await response.text() # Fallback to text
+            except Exception as e:
+                logger.error(f"🚨 Error reading response content from {url}: {e}")
+                response_data = f"Error reading response: {e}"
+
+
+            logger.info(f"✅ Response from {url}: {response.status}")
+            return {
+                **request_details,
+                "status_code": response.status,
+                "response_headers": dict(response.headers),
+                "response_data": response_data,
+                "success": 200 <= response.status < 300,
+            }
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"❌ Connection error for {url}: {e}")
+        return {
+            **request_details,
+            "status_code": 503, # Service Unavailable
+            "response_data": {"error": "Connection Error", "details": str(e)},
+            "success": False,
+            "mock_reason": "Connection Error",
+        }
+    except asyncio.TimeoutError:
+        logger.error(f"⏰ Timeout error for {url}")
+        return {
+            **request_details,
+            "status_code": 504, # Gateway Timeout
+            "response_data": {"error": "Timeout Error", "details": "Request timed out after 10 seconds"},
+            "success": False,
+            "mock_reason": "Timeout Error",
+        }
+    except Exception as e:
+        logger.error(f"💥 Unexpected error for {url}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            **request_details,
+            "status_code": 500, # Internal Server Error
+            "response_data": {"error": "Unexpected Error", "details": str(e)},
+            "success": False,
+            "mock_reason": "Unexpected Error",
+        }
+    
 # Исполнители нод
 class NodeExecutors:
     def __init__(self):
         self.gigachat_api = GigaChatAPI()
     
     
+    async def execute_request_iterator(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info(f"Executing Request Iterator node: {node.id}")
+        config = node.data.get('config', {})
+        base_url = config.get('baseUrl', '').rstrip('/') # Ensure no trailing slash
+        execution_mode = config.get('executionMode', 'sequential')
+        common_headers_str = config.get('commonHeaders', '{}')
+
+        parsed_common_headers = {}
+        try:
+            parsed_common_headers = json.loads(common_headers_str) if common_headers_str else {}
+            if not isinstance(parsed_common_headers, dict):
+                logger.warning("Common headers is not a valid JSON object, ignoring.")
+                parsed_common_headers = {}
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse common headers JSON, ignoring.")
+            parsed_common_headers = {}
+
+        requests_to_make_json_str = ""
+        if input_data and 'output' in input_data and 'text' in input_data['output']:
+            requests_to_make_json_str = input_data['output']['text']
+        elif input_data and isinstance(input_data.get('requests_array'), list):
+            requests_to_make_json_str = json.dumps(input_data.get('requests_array'))
+        elif isinstance(input_data, list): # If the direct input_data is a list
+             requests_to_make_json_str = json.dumps(input_data)
+        elif isinstance(input_data, str): # If the direct input_data is a JSON string
+             requests_to_make_json_str = input_data
+        else:
+            logger.error("Request Iterator: Input data must contain a JSON string or array of requests.")
+            raise Exception("Request Iterator: Input data must contain a JSON string or array of requests.")
+
+        try:
+            requests_list = json.loads(requests_to_make_json_str)
+            if not isinstance(requests_list, list):
+                # If it's a single object, wrap it in a list
+                if isinstance(requests_list, dict):
+                    logger.info("Request Iterator: Received a single JSON object, wrapping it into a list.")
+                    requests_list = [requests_list]
+                else:
+                    raise ValueError("Parsed JSON is not a list or a single request object.")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Request Iterator: Failed to parse JSON input: {str(e)}")
+            raise Exception(f"Request Iterator: Invalid JSON input for requests: {str(e)}")
+
+        if not requests_list:
+            logger.info("Request Iterator: No requests to process from input.")
+            return {
+                "success": True,
+                "executed_requests_count": 0,
+                "responses": [],
+                "output": {"text": "[]"}
+            }
+
+        all_responses = []
+        tasks = []
+
+        # It's better to create one session for all requests from this node execution
+        async with aiohttp.ClientSession() as session:
+            for req_info in requests_list:
+                if not isinstance(req_info, dict):
+                    logger.warning(f"Skipping invalid request item (not a dict): {req_info}")
+                    all_responses.append({
+                        "error": "Invalid request item format",
+                        "item_data": req_info,
+                        "success": False
+                    })
+                    continue
+
+                endpoint = req_info.get('endpoint', '')
+                if not endpoint:
+                    logger.warning(f"Request Iterator: Skipping request with no endpoint: {req_info}")
+                    all_responses.append({
+                        "error": "Missing endpoint",
+                        "item_data": req_info,
+                        "success": False
+                    })
+                    continue
+                
+                # Ensure endpoint starts with a slash if base_url is present, or is a full URL
+                if base_url and not endpoint.startswith('/') and not endpoint.lower().startswith(('http://', 'https://')):
+                    final_url = f"{base_url}/{endpoint.lstrip('/')}"
+                elif not base_url and not endpoint.lower().startswith(('http://', 'https://')):
+                    logger.warning(f"Request Iterator: Endpoint '{endpoint}' is relative but no baseUrl is configured. Skipping.")
+                    all_responses.append({
+                        "error": "Relative endpoint with no baseUrl",
+                        "item_data": req_info,
+                        "success": False
+                    })
+                    continue
+                elif endpoint.lower().startswith(('http://', 'https://')):
+                    final_url = endpoint # Endpoint is already a full URL
+                else: # base_url is present and endpoint starts with /
+                    final_url = f"{base_url}{endpoint}"
+
+
+                method = req_info.get('method', 'GET').upper()
+                
+                # Prepare params for GET and body for POST/PUT etc.
+                get_params = req_info.get('params') if method == 'GET' else None
+                json_body = req_info.get('body') if method in ['POST', 'PUT', 'PATCH'] else None
+                
+                # Merge headers: common_headers < specific_request_headers
+                specific_headers = req_info.get('headers', {})
+                if not isinstance(specific_headers, dict):
+                    logger.warning(f"Specific headers for {final_url} is not a dict, ignoring.")
+                    specific_headers = {}
+
+                final_headers = {**parsed_common_headers, **specific_headers}
+
+                # Create a coroutine for the request
+                task = _make_single_http_request(
+                    session,
+                    method,
+                    final_url,
+                    params=get_params,
+                    json_body=json_body,
+                    headers=final_headers
+                )
+                tasks.append(task)
+
+            if execution_mode == 'parallel' and tasks:
+                logger.info(f"Request Iterator: Executing {len(tasks)} requests in PARALLEL mode.")
+                # asyncio.gather executes tasks concurrently
+                # return_exceptions=True ensures that if one task fails, others continue and we get the exception
+                gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result_or_exc in gathered_results:
+                    if isinstance(result_or_exc, Exception):
+                        # This case should ideally be handled within _make_single_http_request itself
+                        # by returning a structured error. If it still gets here, log it.
+                        logger.error(f"Request Iterator: Unhandled exception from parallel task: {result_or_exc}")
+                        all_responses.append({
+                            "error": "Unhandled parallel execution error",
+                            "details": str(result_or_exc),
+                            "success": False,
+                        })
+                    else:
+                        all_responses.append(result_or_exc)
+            elif tasks: # Sequential mode (default)
+                logger.info(f"Request Iterator: Executing {len(tasks)} requests in SEQUENTIAL mode.")
+                for task_coro in tasks:
+                    result = await task_coro # Await each task one by one
+                    all_responses.append(result)
+            
+        # Filter out any initial error placeholders if they were added before task creation
+        final_responses_list = [r for r in all_responses if r.get("request_url") or r.get("error")]
+
+
+        logger.info(f"Request Iterator: Processed {len(final_responses_list)} requests.")
+        return {
+            "success": True, # The iterator node itself succeeded in processing
+            "executed_requests_count": len(final_responses_list),
+            "responses": final_responses_list,
+            "output": { # Provide the responses as text for downstream nodes
+                "text": json.dumps(final_responses_list, ensure_ascii=False, indent=2),
+                "json_array": final_responses_list # Also provide as a direct array
+            }
+        }
 
     async def execute_gigachat(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение GigaChat ноды"""
@@ -644,98 +888,6 @@ class NodeExecutors:
             raise Exception(f"Unknown merge strategy: {merge_strategy}")
         
         return result
-
-    # В NodeExecutors
-    async def execute_request_iterator(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        logger.info(f"Executing Request Iterator node: {node.id}")
-        config = node.data.get('config', {})
-        base_url = config.get('baseUrl', '') # Например, "http://java-api-host:port"
-        
-        # Ожидаем, что input_data содержит ключ с массивом запросов, 
-        # например, от предыдущей GigaChat ноды.
-        # Ключ может быть 'output' и внутри него 'text', который является JSON строкой,
-        # или уже распарсенный JSON, если GigaChat нода так настроена.
-        
-        requests_to_make_json_str = ""
-        if input_data and 'output' in input_data and 'text' in input_data['output']:
-            requests_to_make_json_str = input_data['output']['text']
-        elif input_data and isinstance(input_data.get('requests_array'), list): # Если уже массив
-            requests_to_make_json_str = json.dumps(input_data.get('requests_array'))
-        else:
-            raise Exception("Request Iterator: Input data must contain a JSON string or array of requests.")
-
-        try:
-            requests_to_make = json.loads(requests_to_make_json_str)
-            if not isinstance(requests_to_make, list):
-                raise ValueError("Parsed JSON is not a list.")
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Request Iterator: Failed to parse JSON input: {str(e)}")
-            raise Exception(f"Request Iterator: Invalid JSON input for requests: {str(e)}")
-
-        all_responses = []
-        
-        # Для асинхронного выполнения можно использовать asyncio.gather
-        # Здесь для простоты последовательное выполнение
-        for req_info in requests_to_make:
-            endpoint = req_info.get('endpoint')
-            params = req_info.get('params', {})
-            method = req_info.get('method', 'GET').upper() # По умолчанию GET
-
-            if not endpoint:
-                logger.warning(f"Request Iterator: Skipping request with no endpoint: {req_info}")
-                continue
-
-            full_url = f"{base_url}{endpoint}"
-            
-            # Формируем query string для GET запросов
-            query_string = ""
-            if method == 'GET' and params:
-                query_string = "?" + "&".join([f"{k}={v}" for k, v in params.items()])
-            
-            final_url = f"{full_url}{query_string}"
-            
-            logger.info(f"Request Iterator: Making {method} request to {final_url}")
-            
-            try:
-                # Используй aiohttp для асинхронных запросов в реальном приложении
-                # response = await http_client_session.request(method, final_url, json=params if method != 'GET' else None)
-                # response_data = await response.json()
-                # status_code = response.status
-                
-                # Симуляция для примера
-                await asyncio.sleep(0.5) # Имитация сетевого запроса
-                response_data = {"message": f"Mock response for {final_url}", "params_received": params}
-                status_code = 200
-                
-                all_responses.append({
-                    "request_url": final_url,
-                    "request_method": method,
-                    "request_params": params,
-                    "status_code": status_code,
-                    "response_data": response_data
-                })
-            except Exception as e:
-                logger.error(f"Request Iterator: Error during request to {final_url}: {str(e)}")
-                all_responses.append({
-                    "request_url": final_url,
-                    "request_method": method,
-                    "request_params": params,
-                    "status_code": 500, # или другой код ошибки
-                    "error": str(e)
-                })
-                
-        return {
-            "success": True,
-            "executed_requests_count": len(requests_to_make),
-            "responses": all_responses,
-            "output": { # Для совместимости с другими нодами, ожидающими 'text'
-                "text": json.dumps(all_responses, ensure_ascii=False, indent=2)
-            }
-        }
-
-# Не забудь добавить 'request_iterator': executors.execute_request_iterator в executor_map
-# И добавить тип ноды в `nodeTypes` на фронтенде.
-
 
 # Глобальный экземпляр исполнителей
 executors = NodeExecutors()

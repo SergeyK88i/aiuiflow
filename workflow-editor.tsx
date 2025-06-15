@@ -435,6 +435,8 @@ useEffect(() => {
       },
       request_iterator: {
         baseUrl: "http://localhost:8080/api", // Пример, измени на свой
+        executionMode: "sequential", // 'sequential' or 'parallel'
+        commonHeaders: JSON.stringify({}, null, 2), // Example common
       },
     }
 
@@ -1358,54 +1360,93 @@ useEffect(() => {
                     </>
                   )}
                   {selectedNode.type === "request_iterator" && (
-                            <>
-                              <div>
-                                <Label htmlFor="baseUrl">Base URL (Java API)</Label>
-                                <Input
-                                  id="baseUrl"
-                                  placeholder="http://java-api-host:port/api"
-                                  value={selectedNode.data.config.baseUrl || ""}
-                                  onChange={(e) => updateNodeConfig("baseUrl", e.target.value)}
-                                />
-                                <p className="text-xs text-gray-500 mt-1">
-                                  Базовый URL вашего Java API. Эндпоинты из входных данных будут добавлены к этому URL.
-                                </p>
-                              </div>
-                              <Alert>
-                                <AlertCircle className="h-4 w-4" /> {/* Можно добавить иконку для Alert */}
-                                <AlertDescription className="text-xs">
-                                  <p className="font-medium mb-1">Принцип работы ноды:</p>
-                                  Эта нода ожидает на вход JSON-массив объектов от предыдущей ноды (например, от GigaChat).
-                                  Каждый объект в массиве должен описывать один HTTP-запрос.
-                                  <p className="mt-2 font-medium">Пример входного JSON:</p>
-                                  <pre className="mt-1 p-2 bg-gray-100 rounded text-[11px] leading-tight overflow-x-auto">
-                                    {`[
-                    {
-                      "endpoint": "/resource/1", 
-                      "params": {"key": "value"}, 
-                      "method": "GET" 
-                    },
-                    {
-                      "endpoint": "/another/resource", 
-                      "params": {"id": 123, "type": "data"},
-                      "method": "POST", // (опционально, по умолчанию GET)
-                      "body": {"some_payload": "data"} // (опционально, для POST/PUT)
-                    }
-                  ]`}
-                                  </pre>
-                                  <p className="mt-2">
-                                    Нода выполнит эти запросы (по умолчанию последовательно) и вернет на выход JSON-массив с результатами каждого запроса.
-                                    Параметры (`params`) для GET запросов будут преобразованы в query string. Для POST/PUT запросов, если указано поле `body`, оно будет отправлено как JSON.
-                                  </p>
-                                </AlertDescription>
-                              </Alert>
-                              {/* Можно добавить другие настройки, если они понадобятся, например:
-                                  - Выбор параллельного или последовательного выполнения запросов
-                                  - Настройки таймаутов
-                                  - Общие заголовки для всех запросов (если не передаются в JSON)
-                              */}
-                            </>
+  <>
+    {/* Base URL */}
+    <div>
+      <Label htmlFor="baseUrl">Base URL (Java API)</Label>
+      <Input
+        id="baseUrl"
+        placeholder="http://java-api-host:port/api"
+        value={selectedNode.data.config.baseUrl || ""}
+        onChange={(e) => updateNodeConfig("baseUrl", e.target.value)}
+      />
+      <p className="text-xs text-gray-500 mt-1">
+        Базовый URL вашего API. Эндпоинты из входных данных будут добавлены к этому URL.
+      </p>
+    </div>
+
+    {/* Execution Mode */}
+    <div className="mt-4">
+      <Label htmlFor="executionMode">Режим выполнения</Label>
+      <Select
+        value={selectedNode.data.config.executionMode || "sequential"}
+        onValueChange={(value) => updateNodeConfig("executionMode", value)}
+      >
+        <SelectTrigger id="executionMode">
+          <SelectValue placeholder="Выберите режим" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="sequential">Последовательно</SelectItem>
+          <SelectItem value="parallel">Параллельно</SelectItem>
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-gray-500 mt-1">
+        Выберите, как выполнять запросы: один за другим или все одновременно.
+      </p>
+    </div>
+
+    {/* Common Headers */}
+    <div className="mt-4">
+      <Label htmlFor="commonHeaders">Общие заголовки (JSON)</Label>
+      <Textarea
+        id="commonHeaders"
+        placeholder={JSON.stringify({"Authorization": "Bearer YOUR_TOKEN", "Content-Type": "application/json"}, null, 2)}
+        value={selectedNode.data.config.commonHeaders || JSON.stringify({}, null, 2)}
+        onChange={(e) => updateNodeConfig("commonHeaders", e.target.value)}
+        rows={4}
+      />
+      <p className="text-xs text-gray-500 mt-1">
+        JSON-объект с заголовками, которые будут добавлены ко всем запросам.
+        Специфичные заголовки из входного JSON могут переопределить эти.
+        Пример: {"{\"X-API-Key\": \"your_key\"}"}
+      </p>
+    </div>
+
+    {/* Informational Alert */}
+    <Alert className="mt-6"> {/* Добавлен отступ сверху для лучшего разделения */}
+      <AlertCircle className="h-4 w-4" />
+      <AlertDescription className="text-xs">
+        <p className="font-medium mb-1">Принцип работы ноды:</p>
+        Эта нода ожидает на вход JSON-массив объектов от предыдущей ноды (например, от GigaChat).
+        Каждый объект в массиве должен описывать один HTTP-запрос.
+        <p className="mt-2 font-medium">Пример входного JSON:</p>
+        <pre className="mt-1 p-2 bg-gray-100 rounded text-[11px] leading-tight overflow-x-auto">
+          {`[
+  {
+    "endpoint": "/resource/1",
+    "method": "GET",
+    "params": {"key": "value"},
+    "headers": {"X-Specific": "value1"}
+  },
+  {
+    "endpoint": "/another/resource",
+    "method": "POST",
+    "body": {"some_payload": "data"},
+    "headers": {"X-Specific": "value2"}
+  }
+]`}
+        </pre>
+        <p className="mt-2">
+          Нода выполнит эти запросы согласно выбранному режиму и вернет на выход JSON-массив с результатами каждого запроса.
+          Параметры (`params`) для GET запросов будут преобразованы в query string.
+          Для POST/PUT/PATCH запросов, если указано поле `body`, оно будет отправлено как JSON-тело.
+          Поле `headers` в каждом объекте запроса может содержать специфичные для него заголовки.
+        </p>
+      </AlertDescription>
+    </Alert>
+  </>
                   )}
+
                 </CardContent>
               </Card>
             </div>
