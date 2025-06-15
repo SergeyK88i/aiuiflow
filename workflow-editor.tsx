@@ -19,6 +19,7 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle,
+  ListChecks,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -64,7 +65,8 @@ const nodeTypes = [
   { type: "timer", label: "Timer Trigger", icon: Timer, color: "bg-blue-500", canStart: true },
   { type: "email", label: "Send Email", icon: Mail, color: "bg-red-500", canStart: false },
   { type: "database", label: "Database Query", icon: Database, color: "bg-purple-500", canStart: false },
-  { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false }, // Новая строка
+  { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false },
+  { type: "request_iterator", label: "Request Iterator", icon: ListChecks, color: "bg-teal-500", canStart: false },
 ]
 // Добавьте после импортов (примерно строка 30)
 const gigaChatRoles = [
@@ -430,6 +432,9 @@ useEffect(() => {
         waitForAll: true,
         mergeStrategy: "combine_text",
         separator: "\n\n---\n\n",
+      },
+      request_iterator: {
+        baseUrl: "http://localhost:8080/api", // Пример, измени на свой
       },
     }
 
@@ -1352,7 +1357,55 @@ useEffect(() => {
                       )}
                     </>
                   )}
-
+                  {selectedNode.type === "request_iterator" && (
+                            <>
+                              <div>
+                                <Label htmlFor="baseUrl">Base URL (Java API)</Label>
+                                <Input
+                                  id="baseUrl"
+                                  placeholder="http://java-api-host:port/api"
+                                  value={selectedNode.data.config.baseUrl || ""}
+                                  onChange={(e) => updateNodeConfig("baseUrl", e.target.value)}
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Базовый URL вашего Java API. Эндпоинты из входных данных будут добавлены к этому URL.
+                                </p>
+                              </div>
+                              <Alert>
+                                <AlertCircle className="h-4 w-4" /> {/* Можно добавить иконку для Alert */}
+                                <AlertDescription className="text-xs">
+                                  <p className="font-medium mb-1">Принцип работы ноды:</p>
+                                  Эта нода ожидает на вход JSON-массив объектов от предыдущей ноды (например, от GigaChat).
+                                  Каждый объект в массиве должен описывать один HTTP-запрос.
+                                  <p className="mt-2 font-medium">Пример входного JSON:</p>
+                                  <pre className="mt-1 p-2 bg-gray-100 rounded text-[11px] leading-tight overflow-x-auto">
+                                    {`[
+                    {
+                      "endpoint": "/resource/1", 
+                      "params": {"key": "value"}, 
+                      "method": "GET" 
+                    },
+                    {
+                      "endpoint": "/another/resource", 
+                      "params": {"id": 123, "type": "data"},
+                      "method": "POST", // (опционально, по умолчанию GET)
+                      "body": {"some_payload": "data"} // (опционально, для POST/PUT)
+                    }
+                  ]`}
+                                  </pre>
+                                  <p className="mt-2">
+                                    Нода выполнит эти запросы (по умолчанию последовательно) и вернет на выход JSON-массив с результатами каждого запроса.
+                                    Параметры (`params`) для GET запросов будут преобразованы в query string. Для POST/PUT запросов, если указано поле `body`, оно будет отправлено как JSON.
+                                  </p>
+                                </AlertDescription>
+                              </Alert>
+                              {/* Можно добавить другие настройки, если они понадобятся, например:
+                                  - Выбор параллельного или последовательного выполнения запросов
+                                  - Настройки таймаутов
+                                  - Общие заголовки для всех запросов (если не передаются в JSON)
+                              */}
+                            </>
+                  )}
                 </CardContent>
               </Card>
             </div>

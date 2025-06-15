@@ -48,6 +48,11 @@ class NodeConfig(BaseModel):
     headers: Optional[str] = None
     interval: Optional[int] = None
     timezone: Optional[str] = None
+    waitForAll: Optional[bool] = True 
+    mergeStrategy: Optional[str] = "combine_text"
+    separator: Optional[str] = "\n\n---\n\n"
+    # Для Request Iterator ноды
+    baseUrl: Optional[str] = None
 
 class Node(BaseModel):
     id: str
@@ -640,6 +645,97 @@ class NodeExecutors:
         
         return result
 
+    # В NodeExecutors
+    async def execute_request_iterator(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info(f"Executing Request Iterator node: {node.id}")
+        config = node.data.get('config', {})
+        base_url = config.get('baseUrl', '') # Например, "http://java-api-host:port"
+        
+        # Ожидаем, что input_data содержит ключ с массивом запросов, 
+        # например, от предыдущей GigaChat ноды.
+        # Ключ может быть 'output' и внутри него 'text', который является JSON строкой,
+        # или уже распарсенный JSON, если GigaChat нода так настроена.
+        
+        requests_to_make_json_str = ""
+        if input_data and 'output' in input_data and 'text' in input_data['output']:
+            requests_to_make_json_str = input_data['output']['text']
+        elif input_data and isinstance(input_data.get('requests_array'), list): # Если уже массив
+            requests_to_make_json_str = json.dumps(input_data.get('requests_array'))
+        else:
+            raise Exception("Request Iterator: Input data must contain a JSON string or array of requests.")
+
+        try:
+            requests_to_make = json.loads(requests_to_make_json_str)
+            if not isinstance(requests_to_make, list):
+                raise ValueError("Parsed JSON is not a list.")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Request Iterator: Failed to parse JSON input: {str(e)}")
+            raise Exception(f"Request Iterator: Invalid JSON input for requests: {str(e)}")
+
+        all_responses = []
+        
+        # Для асинхронного выполнения можно использовать asyncio.gather
+        # Здесь для простоты последовательное выполнение
+        for req_info in requests_to_make:
+            endpoint = req_info.get('endpoint')
+            params = req_info.get('params', {})
+            method = req_info.get('method', 'GET').upper() # По умолчанию GET
+
+            if not endpoint:
+                logger.warning(f"Request Iterator: Skipping request with no endpoint: {req_info}")
+                continue
+
+            full_url = f"{base_url}{endpoint}"
+            
+            # Формируем query string для GET запросов
+            query_string = ""
+            if method == 'GET' and params:
+                query_string = "?" + "&".join([f"{k}={v}" for k, v in params.items()])
+            
+            final_url = f"{full_url}{query_string}"
+            
+            logger.info(f"Request Iterator: Making {method} request to {final_url}")
+            
+            try:
+                # Используй aiohttp для асинхронных запросов в реальном приложении
+                # response = await http_client_session.request(method, final_url, json=params if method != 'GET' else None)
+                # response_data = await response.json()
+                # status_code = response.status
+                
+                # Симуляция для примера
+                await asyncio.sleep(0.5) # Имитация сетевого запроса
+                response_data = {"message": f"Mock response for {final_url}", "params_received": params}
+                status_code = 200
+                
+                all_responses.append({
+                    "request_url": final_url,
+                    "request_method": method,
+                    "request_params": params,
+                    "status_code": status_code,
+                    "response_data": response_data
+                })
+            except Exception as e:
+                logger.error(f"Request Iterator: Error during request to {final_url}: {str(e)}")
+                all_responses.append({
+                    "request_url": final_url,
+                    "request_method": method,
+                    "request_params": params,
+                    "status_code": 500, # или другой код ошибки
+                    "error": str(e)
+                })
+                
+        return {
+            "success": True,
+            "executed_requests_count": len(requests_to_make),
+            "responses": all_responses,
+            "output": { # Для совместимости с другими нодами, ожидающими 'text'
+                "text": json.dumps(all_responses, ensure_ascii=False, indent=2)
+            }
+        }
+
+# Не забудь добавить 'request_iterator': executors.execute_request_iterator в executor_map
+# И добавить тип ноды в `nodeTypes` на фронтенде.
+
 
 # Глобальный экземпляр исполнителей
 executors = NodeExecutors()
@@ -681,7 +777,8 @@ async def execute_node(
             'database': executors.execute_database,
             'webhook': executors.execute_webhook,
             'timer': executors.execute_timer,
-            'join': executors.execute_join  # Добавьте эту строку
+            'join': executors.execute_join,
+            'request_iterator': executors.execute_request_iterator
         }
 
         executor = executor_map.get(node_type)
@@ -856,7 +953,8 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
                 'database': executors.execute_database,
                 'webhook': executors.execute_webhook,
                 'timer': executors.execute_timer,
-                'join': executors.execute_join
+                'join': executors.execute_join,
+                'request_iterator': executors.execute_request_iterator
             }
 
             executor = executor_map.get(node.type)
