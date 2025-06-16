@@ -61,12 +61,14 @@ const API_BASE_URL = "http://localhost:8000"
 
 const nodeTypes = [
   { type: "gigachat", label: "GigaChat AI", icon: MessageSquare, color: "bg-orange-500", canStart: true },
-  { type: "webhook", label: "Webhook Trigger", icon: Webhook, color: "bg-green-500", canStart: true },
+  { type: "webhook_trigger", label: "Webhook Trigger", icon: Webhook, color: "bg-green-500", canStart: true },
+  { type: "webhook", label: "Send Webhook", icon: ExternalLink, color: "bg-blue-600", canStart: false },
   { type: "timer", label: "Timer Trigger", icon: Timer, color: "bg-blue-500", canStart: true },
   { type: "email", label: "Send Email", icon: Mail, color: "bg-red-500", canStart: false },
   { type: "database", label: "Database Query", icon: Database, color: "bg-purple-500", canStart: false },
   { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false },
   { type: "request_iterator", label: "Request Iterator", icon: ListChecks, color: "bg-teal-500", canStart: false },
+  
 ]
 // Добавьте после импортов (примерно строка 30)
 const gigaChatRoles = [
@@ -123,6 +125,70 @@ export default function WorkflowEditor() {
   const [connecting, setConnecting] = useState<string | null>(null)
   const [workflowName, setWorkflowName] = useState("GigaChat Workflow")
   const canvasRef = useRef<HTMLDivElement>(null)
+  // Добавьте в компонент состояние для вебхуков
+  const [webhooks, setWebhooks] = useState<Array<{
+    webhook_id: string;
+    workflow_id: string;
+    name: string;
+    url: string;
+    created_at: string;
+  }>>([]);
+
+  // Добавьте функцию для создания вебхука
+const createWebhook = async () => {
+  if (!workflowName || nodes.length === 0) {
+    alert("Сначала создайте и сохраните workflow");
+    return;
+  }
+
+  try {
+    // Сначала сохраняем workflow
+    await saveWorkflow();
+
+    const response = await fetch(`${API_BASE_URL}/webhooks/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        workflow_id: workflowName.toLowerCase().replace(/ /g, "_"),
+        name: `${workflowName} Webhook`,
+        description: `Webhook для запуска workflow: ${workflowName}`,
+        auth_required: false,
+        allowed_ips: []
+      }),
+    });
+
+    if (response.ok) {
+      const webhook = await response.json();
+      
+      // Обновляем ноду webhook с полученным URL
+      const webhookNode = nodes.find(n => n.type === "webhook_trigger");
+      if (webhookNode) {
+        updateNodeConfig("webhookId", webhook.webhook_id);
+        updateNodeConfig("webhookUrl", webhook.url);
+      }
+
+      setExecutionLogs((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          nodeId: "system",
+          status: "success",
+          message: `Webhook создан: ${webhook.url}`,
+          timestamp: new Date(),
+        },
+      ]);
+
+      // Копируем URL в буфер обмена
+      navigator.clipboard.writeText(webhook.url);
+      alert(`Webhook создан!\n\nURL: ${webhook.url}\n\n(Скопирован в буфер обмена)`);
+    }
+  } catch (error) {
+    console.error("Error creating webhook:", error);
+    alert("Ошибка создания webhook");
+  }
+};
 
   const [isExecuting, setIsExecuting] = useState(false)
   const [executionLogs, setExecutionLogs] = useState<
@@ -409,6 +475,11 @@ useEffect(() => {
         systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
         userMessage: "Привет! Расскажи что-нибудь интересное о программировании.",
         clearHistory: false,
+      },
+      webhook_trigger: {
+        url: "https://api.example.com/webhook",
+        method: "POST",
+        headers: "Content-Type: application/json",
       },
       webhook: {
         url: "https://api.example.com/webhook",
@@ -907,6 +978,16 @@ useEffect(() => {
             <Save className="w-4 h-4 mr-2" />
             Save
           </Button>
+        
+<Button 
+  variant="outline" 
+  size="sm" 
+  onClick={createWebhook}
+  disabled={nodes.length === 0 || !nodes.some(n => n.type === "webhook_trigger") || apiStatus === "offline"}
+>
+  <Webhook className="w-4 h-4 mr-2" />
+  Create Webhook
+</Button>
           {isExecuting ? (
             <Button onClick={stopExecution} size="sm" variant="destructive">
               <Square className="w-4 h-4 mr-2" />
@@ -1107,45 +1188,123 @@ useEffect(() => {
                   </>
                 )}
 
-                  {selectedNode.type === "webhook" && (
-                    <>
-                      <div>
-                        <Label htmlFor="url">Webhook URL</Label>
-                        <Input
-                          id="url"
-                          placeholder="https://api.example.com/webhook"
-                          value={selectedNode.data.config.url || ""}
-                          onChange={(e) => updateNodeConfig("url", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="method">Method</Label>
-                        <Select
-                          value={selectedNode.data.config.method || "POST"}
-                          onValueChange={(value) => updateNodeConfig("method", value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="POST" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="GET">GET</SelectItem>
-                            <SelectItem value="POST">POST</SelectItem>
-                            <SelectItem value="PUT">PUT</SelectItem>
-                            <SelectItem value="DELETE">DELETE</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="headers">Headers</Label>
-                        <Textarea
-                          id="headers"
-                          placeholder="Content-Type: application/json"
-                          value={selectedNode.data.config.headers || ""}
-                          onChange={(e) => updateNodeConfig("headers", e.target.value)}
-                        />
-                      </div>
-                    </>
-                  )}
+
+{selectedNode.type === "webhook_trigger" && (
+  <>
+    <div>
+      <Label>Webhook Status</Label>
+      {selectedNode.data.config.webhookUrl ? (
+        <div className="space-y-2">
+          <div className="p-3 bg-green-50 rounded-md">
+            <p className="text-sm font-medium text-green-800">✅ Webhook активен</p>
+            <p className="text-xs text-green-600 mt-1 break-all">
+              {selectedNode.data.config.webhookUrl}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => {
+              navigator.clipboard.writeText(selectedNode.data.config.webhookUrl);
+              alert("URL скопирован в буфер обмена");
+            }}
+          >
+            <ExternalLink className="w-3 h-3 mr-2" />
+            Копировать URL
+          </Button>
+        </div>
+      ) : (
+        <div className="p-3 bg-gray-50 rounded-md">
+          <p className="text-sm text-gray-600">
+            Webhook не создан. Нажмите "Create Webhook" в верхней панели.
+          </p>
+        </div>
+      )}
+    </div>
+
+    <div className="flex items-center space-x-2">
+      <Switch
+        id="authRequired"
+        checked={selectedNode.data.config.authRequired || false}
+        onCheckedChange={(checked) => updateNodeConfig("authRequired", checked)}
+      />
+      <Label htmlFor="authRequired">Требовать авторизацию</Label>
+    </div>
+
+    <div>
+      <Label htmlFor="allowedIps">Разрешенные IP адреса</Label>
+      <Textarea
+        id="allowedIps"
+        placeholder="192.168.1.1&#10;10.0.0.1"
+        value={selectedNode.data.config.allowedIps || ""}
+        onChange={(e) => updateNodeConfig("allowedIps", e.target.value)}
+        rows={3}
+      />
+      <p className="text-xs text-gray-500 mt-1">
+        Оставьте пустым для доступа с любых IP. Каждый IP с новой строки.
+      </p>
+    </div>
+  </>
+)}
+{selectedNode.type === "webhook" && (
+  <>
+    <div>
+      <Label htmlFor="url">Target URL</Label>
+      <Input
+        id="url"
+        placeholder="https://api.example.com/endpoint/{{input.output.id}}"
+        value={selectedNode.data.config.url || ""}
+        onChange={(e) => updateNodeConfig("url", e.target.value)}
+      />
+      <p className="text-xs text-gray-500 mt-1">
+        URL для отправки запроса. Поддерживает шаблоны: {"{{input.output.field}}"}
+      </p>
+    </div>
+
+    <div>
+      <Label htmlFor="method">HTTP Method</Label>
+      <Select
+        value={selectedNode.data.config.method || "POST"}
+        onValueChange={(value) => updateNodeConfig("method", value)}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder="POST" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="GET">GET</SelectItem>
+          <SelectItem value="POST">POST</SelectItem>
+          <SelectItem value="PUT">PUT</SelectItem>
+          <SelectItem value="PATCH">PATCH</SelectItem>
+          <SelectItem value="DELETE">DELETE</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+
+    <div>
+      <Label htmlFor="headers">Headers</Label>
+      <Textarea
+        id="headers"
+        placeholder="Content-Type: application/json&#10;Authorization: Bearer {{input.output.token}}"
+        value={selectedNode.data.config.headers || "Content-Type: application/json"}
+        onChange={(e) => updateNodeConfig("headers", e.target.value)}
+        rows={3}
+      />
+      <p className="text-xs text-gray-500 mt-1">
+        Заголовки запроса (каждый с новой строки). Поддерживает шаблоны.
+      </p>
+    </div>
+
+    <Alert className="mt-4">
+      <AlertCircle className="h-4 w-4" />
+      <AlertDescription className="text-xs">
+        Эта нода отправляет HTTP запрос на указанный URL с данными от предыдущей ноды.
+        Используйте шаблоны {"{{input.output.field}}"} для динамических значений.
+      </AlertDescription>
+    </Alert>
+  </>
+)}
+
                   {selectedNode.type === "email" && (
                     <>
                       <div>

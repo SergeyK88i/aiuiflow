@@ -1,8 +1,8 @@
 import aiohttp
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,Request, Body, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import requests
 import uuid
 import json
@@ -10,6 +10,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 import re
+import hashlib
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -32,6 +33,11 @@ active_timers = {}
 saved_workflows = {}
 # Добавьте эту глобальную переменную для хранения последних результатов выполнения нод
 node_execution_results = {}
+
+# Расширьте глобальное хранилище webhook_triggers (около строки 40)
+webhook_triggers: Dict[str, Dict[str, Any]] = {}
+# Добавьте статистику вебхуков
+webhook_stats: Dict[str, Dict[str, Any]] = {}
 
 # Модели данных
 class NodeConfig(BaseModel):
@@ -84,6 +90,26 @@ class WorkflowSaveRequest(BaseModel):
     name: str
     nodes: List[Node]
     connections: List[Connection]
+
+# Добавьте новые модели данных после существующих (около строки 80)
+class WebhookCreateRequest(BaseModel):
+    workflow_id: str
+    name: str
+    description: Optional[str] = None
+    auth_required: Optional[bool] = False
+    allowed_ips: Optional[List[str]] = None
+
+class WebhookInfo(BaseModel):
+    webhook_id: str
+    workflow_id: str
+    name: str
+    description: Optional[str] = None
+    created_at: str
+    url: str
+    auth_required: bool = False
+    allowed_ips: Optional[List[str]] = None
+    call_count: int = 0
+    last_called: Optional[str] = None
 
 # GigaChat API класс
 class GigaChatAPI:
@@ -704,26 +730,99 @@ class NodeExecutors:
         }
 
     async def execute_webhook(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Выполнение Webhook ноды"""
+        """Выполнение Webhook ноды - отправляет HTTP запрос"""
         config = node.data.get('config', {})
-        url = config.get('url', 'https://example.com/webhook')
-        method = config.get('method', 'POST')
-        headers = config.get('headers', 'Content-Type: application/json')
+        url = config.get('url', '')
+        method = config.get('method', 'POST').upper()
+        headers_str = config.get('headers', 'Content-Type: application/json')
+        
+        # Заменяем шаблоны в URL (например, https://api.com/user/{{input.output.user_id}})
+        if input_data:
+            url = replace_templates(url, input_data)
 
-        logger.info(f"🌐 Webhook запрос: {method} {url}")
+        if not url:
+            raise Exception("Webhook URL is required")
+        
+        # Парсим заголовки
+        headers = {}
+        if headers_str:
+            for line in headers_str.strip().split('\n'):
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    headers[key.strip()] = value.strip()
+        
+        # Подготавливаем данные для отправки
+        # Если есть output.text от предыдущей ноды, используем его
+        payload = input_data
+        if input_data and 'output' in input_data:
+            # Можно отправить либо весь output, либо только text
+            payload = input_data['output']
+        
+        logger.info(f"🌐 Отправка {method} запроса на {url}")
+        logger.info(f"📦 Payload: {json.dumps(payload, ensure_ascii=False)[:200]}...")
+        
+        try:
+            # Реальная отправка запроса
+            async with aiohttp.ClientSession() as session:
+                async with session.request(
+                    method=method,
+                    url=url,
+                    json=payload if method in ['POST', 'PUT', 'PATCH'] else None,
+                    params=payload if method == 'GET' else None,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                    ssl=False  # Для тестирования
+                ) as response:
+                    response_text = await response.text()
+                    response_json = None
+                    
+                    try:
+                        response_json = await response.json()
+                    except:
+                        pass  # Не все ответы в JSON
+                    
+                    logger.info(f"✅ Webhook ответ: {response.status}")
+                    
+                    return {
+                        "success": response.status < 400,
+                        "status_code": response.status,
+                        "response": response_text,
+                        "response_json": response_json,
+                        "url": url,
+                        "method": method,
+                        "timestamp": datetime.now().isoformat(),
+                        "output": {
+                            "text": response_text,
+                            "status": response.status,
+                            "json": response_json
+                        }
+                    }
+                    
+        except aiohttp.ClientError as e:
+            logger.error(f"❌ Ошибка webhook: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_type": "connection_error",
+                "url": url,
+                "method": method,
+                "timestamp": datetime.now().isoformat(),
+                "output": {
+                    "text": f"Error: {str(e)}",
+                    "status": 0
+                }
+            }
+        except Exception as e:
+            logger.error(f"❌ Неожиданная ошибка webhook: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_type": "unexpected_error",
+                "url": url,
+                "method": method,
+                "timestamp": datetime.now().isoformat()
+            }
 
-        # Здесь будет реальный HTTP запрос
-        # Пока симулируем
-        await asyncio.sleep(1)
-
-        return {
-            "success": True,
-            "message": "Webhook triggered",
-            "url": url,
-            "method": method,
-            "timestamp": datetime.now().isoformat(),
-            "inputData": input_data
-        }
 
     async def execute_timer(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение Timer ноды"""
@@ -993,12 +1092,263 @@ async def save_workflow(request: WorkflowSaveRequest):
             "success": False,
             "error": str(e)
         }
+# Добавьте новые эндпоинты после существующих
 
-async def execute_workflow_internal(request: WorkflowExecuteRequest):
+@app.post("/webhooks/create")
+async def create_webhook(request: WebhookCreateRequest):
+    """Создает новый вебхук для workflow"""
+    try:
+        # Проверяем, существует ли workflow
+        if request.workflow_id not in saved_workflows:
+            raise HTTPException(status_code=404, detail=f"Workflow {request.workflow_id} not found")
+        
+        # Генерируем уникальный ID для вебхука
+        webhook_id = str(uuid.uuid4())
+        
+        # Сохраняем информацию о вебхуке
+        webhook_info = {
+            "webhook_id": webhook_id,
+            "workflow_id": request.workflow_id,
+            "name": request.name,
+            "description": request.description,
+            "created_at": datetime.now().isoformat(),
+            "auth_required": request.auth_required,
+            "allowed_ips": request.allowed_ips or [],
+            "call_count": 0,
+            "last_called": None
+        }
+        
+        webhook_triggers[webhook_id] = webhook_info
+        
+        # Инициализируем статистику
+        webhook_stats[webhook_id] = {
+            "total_calls": 0,
+            "successful_calls": 0,
+            "failed_calls": 0,
+            "last_error": None,
+            "call_history": []  # Последние 10 вызовов
+        }
+        
+        # Формируем полный URL
+        base_url = "http://localhost:8000"  # В продакшене берите из конфига
+        webhook_url = f"{base_url}/webhooks/{webhook_id}"
+        
+        logger.info(f"✅ Создан вебхук {webhook_id} для workflow {request.workflow_id}")
+        
+        return WebhookInfo(
+            webhook_id=webhook_id,
+            workflow_id=request.workflow_id,
+            name=request.name,
+            description=request.description,
+            created_at=webhook_info["created_at"],
+            url=webhook_url,
+            auth_required=request.auth_required,
+            allowed_ips=request.allowed_ips,
+            call_count=0,
+            last_called=None
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания вебхука: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/webhooks/{webhook_id}")
+async def trigger_webhook(
+    webhook_id: str,
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None)
+):
+    logger.info(f"🔔 Webhook {webhook_id} triggered")
+    logger.info(f"📦 Received data: {json.dumps(body, ensure_ascii=False)[:200]}...")
+    """Обработчик вызова вебхука"""
+    try:
+        # Проверяем существование вебхука
+        if webhook_id not in webhook_triggers:
+            raise HTTPException(status_code=404, detail="Webhook not found")
+        
+        webhook_info = webhook_triggers[webhook_id]
+        
+        # Проверка IP-адреса если настроена
+        client_ip = request.client.host
+        if webhook_info.get("allowed_ips") and client_ip not in webhook_info["allowed_ips"]:
+            logger.warning(f"⚠️ Попытка вызова вебхука {webhook_id} с неразрешенного IP: {client_ip}")
+            raise HTTPException(status_code=403, detail="IP not allowed")
+        
+        # Проверка авторизации если требуется
+        if webhook_info.get("auth_required") and not authorization:
+            raise HTTPException(status_code=401, detail="Authorization required")
+        
+        # Обновляем статистику
+        webhook_triggers[webhook_id]["call_count"] += 1
+        webhook_triggers[webhook_id]["last_called"] = datetime.now().isoformat()
+        webhook_stats[webhook_id]["total_calls"] += 1
+        
+        # Логируем вызов
+        logger.info(f"🔔 Вебхук {webhook_id} вызван с данными: {json.dumps(body, ensure_ascii=False)[:200]}...")
+        
+        # Получаем workflow
+        workflow_id = webhook_info["workflow_id"]
+        if workflow_id not in saved_workflows:
+            raise HTTPException(status_code=404, detail="Associated workflow not found")
+        
+        workflow_data = saved_workflows[workflow_id]
+        
+        # Находим ноду webhook_trigger в workflow
+        webhook_trigger_node = None
+        for node in workflow_data["nodes"]:
+            if node.type == "webhook_trigger":
+                webhook_trigger_node = node
+                break
+        
+        if not webhook_trigger_node:
+            # Если нет специальной ноды webhook_trigger, начинаем с первой доступной
+            logger.warning(f"⚠️ В workflow {workflow_id} нет ноды webhook_trigger")
+        
+        # Создаем запрос на выполнение workflow
+        workflow_request = WorkflowExecuteRequest(
+            nodes=workflow_data["nodes"],
+            connections=workflow_data["connections"],
+            startNodeId=webhook_trigger_node.id if webhook_trigger_node else None
+        )
+        
+        # Выполняем workflow с переданными данными
+        result = await execute_workflow_internal(workflow_request, initial_input_data=body)
+        
+        # Обновляем статистику успешных вызовов
+        webhook_stats[webhook_id]["successful_calls"] += 1
+        
+        # Сохраняем в историю (последние 10)
+        call_record = {
+            "timestamp": datetime.now().isoformat(),
+            "success": True,
+            "input_data": body,
+            "result": result.result if result.success else None,
+            "error": result.error if not result.success else None
+        }
+        
+        webhook_stats[webhook_id]["call_history"].insert(0, call_record)
+        webhook_stats[webhook_id]["call_history"] = webhook_stats[webhook_id]["call_history"][:10]
+        
+        if result.success:
+            logger.info(f"✅ Вебхук {webhook_id} успешно выполнил workflow")
+            return {
+                "success": True,
+                "webhook_id": webhook_id,
+                "workflow_id": workflow_id,
+                "result": result.result,
+                "execution_time": datetime.now().isoformat()
+            }
+        else:
+            logger.error(f"❌ Ошибка выполнения workflow для вебхука {webhook_id}: {result.error}")
+            webhook_stats[webhook_id]["failed_calls"] += 1
+            webhook_stats[webhook_id]["last_error"] = result.error
+            raise HTTPException(status_code=500, detail=result.error)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки вебхука {webhook_id}: {str(e)}")
+        webhook_stats[webhook_id]["failed_calls"] += 1
+        webhook_stats[webhook_id]["last_error"] = str(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/webhooks")
+async def list_webhooks():
+    """Получить список всех вебхуков"""
+    webhooks = []
+    for webhook_id, info in webhook_triggers.items():
+        base_url = "http://localhost:8000"
+        webhook_url = f"{base_url}/webhooks/{webhook_id}"
+        
+        webhooks.append(WebhookInfo(
+            webhook_id=webhook_id,
+            workflow_id=info["workflow_id"],
+            name=info["name"],
+            description=info.get("description"),
+            created_at=info["created_at"],
+            url=webhook_url,
+            auth_required=info.get("auth_required", False),
+            allowed_ips=info.get("allowed_ips"),
+            call_count=info.get("call_count", 0),
+            last_called=info.get("last_called")
+        ))
+    
+    return {"webhooks": webhooks}
+
+@app.get("/webhooks/{webhook_id}/info")
+async def get_webhook_info(webhook_id: str):
+    """Получить информацию о конкретном вебхуке"""
+    if webhook_id not in webhook_triggers:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    
+    info = webhook_triggers[webhook_id]
+    stats = webhook_stats.get(webhook_id, {})
+    
+    base_url = "http://localhost:8000"
+    webhook_url = f"{base_url}/webhooks/{webhook_id}"
+    
+    return {
+        "webhook": WebhookInfo(
+            webhook_id=webhook_id,
+            workflow_id=info["workflow_id"],
+            name=info["name"],
+            description=info.get("description"),
+            created_at=info["created_at"],
+            url=webhook_url,
+            auth_required=info.get("auth_required", False),
+            allowed_ips=info.get("allowed_ips"),
+            call_count=info.get("call_count", 0),
+            last_called=info.get("last_called")
+        ),
+        "statistics": {
+            "total_calls": stats.get("total_calls", 0),
+            "successful_calls": stats.get("successful_calls", 0),
+            "failed_calls": stats.get("failed_calls", 0),
+            "last_error": stats.get("last_error"),
+            "recent_calls": stats.get("call_history", [])[:5]
+        }
+    }
+
+@app.delete("/webhooks/{webhook_id}")
+async def delete_webhook(webhook_id: str):
+    """Удалить вебхук"""
+    if webhook_id not in webhook_triggers:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    
+    del webhook_triggers[webhook_id]
+    if webhook_id in webhook_stats:
+        del webhook_stats[webhook_id]
+    
+    logger.info(f"🗑️ Вебхук {webhook_id} удален")
+    
+    return {"message": f"Webhook {webhook_id} deleted successfully"}
+
+@app.put("/webhooks/{webhook_id}")
+async def update_webhook(webhook_id: str, request: WebhookCreateRequest):
+    """Обновить настройки вебхука"""
+    if webhook_id not in webhook_triggers:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    
+    # Обновляем информацию
+    webhook_triggers[webhook_id].update({
+        "name": request.name,
+        "description": request.description,
+        "auth_required": request.auth_required,
+        "allowed_ips": request.allowed_ips or []
+    })
+    
+    logger.info(f"🔄 Вебхук {webhook_id} обновлен")
+    
+    return {"message": "Webhook updated successfully"}
+
+async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_input_data: Optional[Dict[str, Any]] = None):
     """Внутренняя функция выполнения workflow (без HTTP обертки)"""
     logs = []
     try:
         logger.info(f"🚀 Запуск workflow с {len(request.nodes)} нодами")
+        if initial_input_data:
+            logger.info(f"💡 Workflow запущен с начальными данными: {json.dumps(initial_input_data, default=str, indent=2)[:300]}...")
         
         # Детальное логирование нод и соединений (из старой версии)
         for node in request.nodes:
@@ -1051,11 +1401,34 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
         results = {}
         
         
-        async def execute_node_recursive(node_id: str, input_data: Dict[str, Any] = None, source_node_id: str = None):
+        async def execute_node_recursive(node_id: str, input_data: Dict[str, Any] = None, source_node_id: str = None, is_first_node: bool = False):
             node = next((n for n in request.nodes if n.id == node_id), None)
             if not node:
                 return None
 
+            # Если это первая нода И есть initial_input_data, используем их
+            if is_first_node and initial_input_data:
+                input_data = initial_input_data
+                logger.info(f"💡 Стартовая нода {node_id} получила начальные данные от вебхука")
+            
+            # Специальная обработка для webhook ноды
+            if node.type == 'webhook_trigger' and is_first_node:
+                logger.info(f"🔔 Webhook нода {node_id} активирована")
+                # Webhook нода просто передает полученные данные дальше
+                result = {
+                    "success": True,
+                    "output": input_data,
+                    "message": "Webhook data received"
+                }
+                results[node_id] = result
+                
+                # Передаем данные следующим нодам
+                next_connections = [c for c in request.connections if c.source == node_id]
+                for connection in next_connections:
+                    await execute_node_recursive(connection.target, result, node_id, False)
+                
+                return result
+            
             # Проверяем, является ли это join нодой с множественными входами
             incoming_connections = [c for c in request.connections if c.target == node_id]
             
@@ -1131,7 +1504,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest):
                 raise Exception(f"Unknown node type: {node.type}")
 
         # Запускаем выполнение
-        await execute_node_recursive(start_node.id)
+        await execute_node_recursive(start_node.id, is_first_node=True)
 
         return ExecutionResult(
             success=True,
