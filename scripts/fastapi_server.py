@@ -295,7 +295,10 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                 )
                 
                 # Выполняем workflow правильно
+                start_time = datetime.now()
                 result = await execute_workflow_internal(workflow_request)
+                execution_time = (datetime.now() - start_time).total_seconds()
+                logger.info(f"⏱️ Workflow выполнен за {execution_time:.2f} секунд")
                 
                 if result.success:
                     logger.info(f"✅ Таймер {timer_id} успешно выполнил workflow")
