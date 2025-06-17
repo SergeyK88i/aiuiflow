@@ -275,10 +275,18 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
             
             # Обновляем время следующего выполнения
             active_timers[timer_id]["next_execution"] = datetime.now() + timedelta(minutes=interval)
+
+            # Перед началом выполнения workflow
+            if timer_id in active_timers and active_timers[timer_id].get("is_executing_workflow", False):
+                logger.warning(f"⚠️ Таймер {timer_id} уже выполняет workflow, пропускаем этот цикл")
+                continue
+
+            # 🔴 ДОБАВИТЬ: Отмечаем начало выполнения workflow
+            active_timers[timer_id]["is_executing_workflow"] = True
             
-            # Выполняем workflow
-            logger.info(f"🚀 Таймер {timer_id} запускает workflow")
             try:
+                # Выполняем workflow
+                logger.info(f"🚀 Таймер {timer_id} запускает workflow")
                 # Используем ту же логику, что и execute_workflow
                 workflow_request = WorkflowExecuteRequest(
                     nodes=workflow_info["nodes"],
@@ -302,11 +310,19 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
                             }
                 else:
                     logger.error(f"❌ Ошибка выполнения workflow таймером {timer_id}: {result.error}")
+            
                     
             except Exception as e:
                 logger.error(f"❌ Ошибка при выполнении workflow таймером {timer_id}: {str(e)}")
                 import traceback
                 logger.error(f"🔍 Трассировка: {traceback.format_exc()}")
+            finally:
+                # 🔴 ДОБАВИТЬ: Снимаем флаг выполнения
+                if timer_id in active_timers:
+                    active_timers[timer_id]["is_executing_workflow"] = False
+                    logger.info(f"🔓 Флаг выполнения снят для таймера {timer_id}")
+                else:
+                    logger.warning(f"⚠️ Таймер {timer_id} был удален во время выполнения workflow")
                 
     except asyncio.CancelledError:
         logger.info(f"🛑 Таймер {timer_id} остановлен")
@@ -759,20 +775,29 @@ class NodeExecutors:
             payload = input_data['output']
         
         logger.info(f"🌐 Отправка {method} запроса на {url}")
-        logger.info(f"📦 Payload: {json.dumps(payload, ensure_ascii=False)[:200]}...")
+        if method in ['POST', 'PUT', 'PATCH'] and payload:
+            logger.info(f"📦 Payload: {json.dumps(payload, ensure_ascii=False)[:200]}...")
         
         try:
             # Реальная отправка запроса
             async with aiohttp.ClientSession() as session:
-                async with session.request(
-                    method=method,
-                    url=url,
-                    json=payload if method in ['POST', 'PUT', 'PATCH'] else None,
-                    params=payload if method == 'GET' else None,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=30),
-                    ssl=False  # Для тестирования
-                ) as response:
+                # ⬇️ ГЛАВНОЕ ИЗМЕНЕНИЕ: Правильная обработка параметров
+                request_params = {
+                    'method': method,
+                    'url': url,
+                    'headers': headers,
+                    'timeout': aiohttp.ClientTimeout(total=30),
+                    'ssl': False
+                }
+            
+                # Добавляем body только для методов, которые его поддерживают
+                if method in ['POST', 'PUT', 'PATCH'] and payload:
+                    request_params['json'] = payload
+                
+                # Для GET запросов НЕ добавляем params из payload
+                # (если нужны query параметры, они должны быть в URL)
+            
+                async with session.request(**request_params) as response:
                     response_text = await response.text()
                     response_json = None
                     
@@ -782,6 +807,10 @@ class NodeExecutors:
                         pass  # Не все ответы в JSON
                     
                     logger.info(f"✅ Webhook ответ: {response.status}")
+                    
+                    # ⬇️ ДОБАВЛЕНО: Логирование полученных данных для отладки
+                    if response_json and isinstance(response_json, list):
+                        logger.info(f"📊 Получено {len(response_json)} элементов")
                     
                     return {
                         "success": response.status < 400,
@@ -797,6 +826,7 @@ class NodeExecutors:
                             "json": response_json
                         }
                     }
+
                     
         except aiohttp.ClientError as e:
             logger.error(f"❌ Ошибка webhook: {str(e)}")
@@ -843,6 +873,34 @@ class NodeExecutors:
             # Проверяем, существует ли уже таймер для этой ноды
             timer_id = f"timer_{node.id}"
             
+            # 🔴 ДОБАВИТЬ ЗДЕСЬ ПРОВЕРКУ
+            # Проверяем, выполняет ли таймер сейчас workflow
+            if timer_id in active_timers:
+                current_timer = active_timers[timer_id]
+                if current_timer.get("is_executing_workflow", False):
+                    logger.info(f"⏳ Timer {timer_id} сейчас выполняет workflow, пропускаем обновление")
+                    
+                    # Формируем выходные данные без пересоздания таймера
+                    current_time = datetime.now()
+                    next_execution = current_timer.get("next_execution", current_time + timedelta(minutes=interval))
+                    
+                    return {
+                        "success": True,
+                        "message": f"Timer is currently executing workflow",
+                        "interval": interval,
+                        "timezone": timezone,
+                        "timestamp": current_time.isoformat(),
+                        "next_execution": next_execution.isoformat() if isinstance(next_execution, datetime) else next_execution,
+                        "timer_id": timer_id,
+                        "output": {
+                            "text": f"Timer triggered at {current_time.isoformat()}. Timer is currently busy.",
+                            "timestamp": current_time.isoformat(),
+                            "interval": interval,
+                            "timezone": timezone
+                        }
+                    }
+            # 🔴 КОНЕЦ ДОБАВЛЕННОГО БЛОКА
+
             # Получаем ID текущего workflow из имени
             workflow_id = None
             for wf_id, wf_data in saved_workflows.items():
@@ -902,6 +960,7 @@ class NodeExecutors:
         except Exception as e:
             logger.error(f"❌ Ошибка выполнения Timer ноды: {str(e)}")
             raise Exception(f"Timer execution failed: {str(e)}")
+    
     async def execute_join(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение Join/Merge ноды"""
         config = node.data.get('config', {})
