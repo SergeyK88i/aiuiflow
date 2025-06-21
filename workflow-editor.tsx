@@ -20,6 +20,9 @@ import {
   AlertCircle,
   CheckCircle,
   ListChecks,
+  Info,
+  GitBranch,
+  Box,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,6 +35,41 @@ import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { GitMerge } from "lucide-react" // Добавьте к существующим импортам
 
+/**
+ * Проверяет, является ли potentialAncestorId предком для nodeId в графе.
+ * Это используется для обнаружения создания циклов.
+ * @param potentialAncestorId - ID узла, к которому мы пытаемся подключиться.
+ * @param nodeId - ID узла, от которого идет соединение.
+ * @param connections - Массив всех существующих соединений.
+ * @returns true, если создается цикл.
+ */
+const isCreatingCycle = (targetId: string, sourceId: string, connections: Connection[]): boolean => {
+  // Мы ищем путь от targetId к sourceId. Если он существует,
+  // то добавление соединения от sourceId к targetId создаст цикл.
+  const queue: string[] = [targetId];
+  const visited = new Set<string>([targetId]);
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    
+    if (currentId === sourceId) {
+      // Мы нашли путь от цели к источнику, значит, это создаст цикл.
+      return true;
+    }
+
+    // Находим все узлы, в которые можно попасть из текущего узла
+    const outgoingConnections = connections.filter(c => c.source === currentId);
+    for (const conn of outgoingConnections) {
+      if (!visited.has(conn.target)) {
+        visited.add(conn.target);
+        queue.push(conn.target);
+      }
+    }
+  }
+
+  // Путь не найден, цикл не создается.
+  return false;
+};
 
 interface Node {
   id: string
@@ -56,6 +94,11 @@ interface TimerData {
   next_execution: string
   status: "active" | "paused" | "error"
 }
+interface ConnectionWithLabel extends Connection {
+  data?: {
+    label?: string;
+  };
+}
 
 const API_BASE_URL = "http://localhost:8000"
 
@@ -68,8 +111,10 @@ const nodeTypes = [
   { type: "database", label: "Database Query", icon: Database, color: "bg-purple-500", canStart: false },
   { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false },
   { type: "request_iterator", label: "Request Iterator", icon: ListChecks, color: "bg-teal-500", canStart: false },
+  {type: "if_else",label: "If/Else",icon: GitBranch, color: "bg-purple-500",description: "Условное ветвление с поддержкой циклов"},
+  ];
   
-]
+  
 // Добавьте после импортов (примерно строка 30)
 const gigaChatRoles = [
   {
@@ -124,6 +169,7 @@ export default function WorkflowEditor() {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [connecting, setConnecting] = useState<string | null>(null)
   const [workflowName, setWorkflowName] = useState("GigaChat Workflow")
+  const [connectionsWithLabel, setConnectionsWithLabel] = useState<ConnectionWithLabel[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null)
   // Добавьте в компонент состояние для вебхуков
   const [webhooks, setWebhooks] = useState<Array<{
@@ -133,6 +179,371 @@ export default function WorkflowEditor() {
     url: string;
     created_at: string;
   }>>([]);
+  
+  // 1. Замени текущую функцию handleConnect на эту:
+const handleConnect = (targetId: string) => {
+  if (!connecting) return;
+
+  // Проверяем, это If/Else соединение или обычное
+  if (connecting.includes(':')) {
+    // If/Else соединение
+    const [sourceId, portType] = connecting.split(':');
+    const sourceNode = nodes.find(n => n.id === sourceId);
+    
+    // Проверяем, включен ли GOTO режим для этой ноды
+    const isGotoEnabled = sourceNode?.data.config.enableGoto || false;
+    
+    let useGoto = false;
+    let finalLabel = portType;
+
+    // Проверяем, не создается ли цикл обычным соединением
+    if (isCreatingCycle(targetId, sourceId, connections)) {
+      const confirmGoto = confirm(
+        "⚠️ Обнаружен циклический переход!\n\n" +
+        "Вы пытаетесь соединить узел с одним из его предшественников. Чтобы избежать бесконечных циклов, это соединение должно быть GOTO-переходом.\n\n" +
+        "Нажмите 'ОК', чтобы автоматически преобразовать это соединение в безопасный GOTO-переход (рекомендуется).\n" +
+        "Нажмите 'Отмена', чтобы отменить создание этого соединения."
+      );
+
+      if (confirmGoto) {
+        useGoto = true;
+      } else {
+        setConnecting(null); // Отменяем соединение
+        return;
+      }
+    } else if (isGotoEnabled) {
+      // Если GOTO включен и цикл не обнаружен, спрашиваем пользователя как обычно
+      const confirmRegularGoto = confirm(
+        `Создать GOTO переход?\n\n` +
+        `ОК - создать ${portType}:goto (для циклов)\n` +
+        `Отмена - создать обычный ${portType} переход`
+      );
+      if (confirmRegularGoto) {
+        useGoto = true;
+      }
+    }
+
+    if (useGoto) {
+      finalLabel = `${portType}:goto`;
+    }
+    
+    const newConnection: ConnectionWithLabel = {
+      id: `${sourceId}-${targetId}-${Date.now()}`,
+      source: sourceId,
+      target: targetId,
+      data: { label: finalLabel }
+    };
+    
+    setConnections([...connections, newConnection]);
+  } else {
+    // Обычное соединение
+    const newConnection = {
+      id: `${connecting}-${targetId}-${Date.now()}`,
+      source: connecting,
+      target: targetId,
+    };
+    
+    setConnections([...connections, newConnection]);
+  }
+  
+  setConnecting(null);
+};
+  
+  const [draggedConnection, setDraggedConnection] = useState<{
+    sourceId: string;
+    portType?: string;
+  } | null>(null);
+
+  const renderNode = (node: Node) => {
+    const isSelected = selectedNode?.id === node.id;
+    const nodeResult = executionResults[node.id];
+    const isExecuting = nodeResult?.status === "success";
+  
+    const NodeIcon = nodeTypes.find((t) => t.type === node.type)?.icon || Box;
+  
+    return (
+      <div
+        key={node.id}
+        className={`absolute bg-white rounded-lg shadow-lg border-2 p-4 ${
+          isSelected ? "border-blue-500" : "border-gray-200"
+        } ${isExecuting ? "animate-pulse border-green-500" : ""}`}
+        style={{
+          left: node.position.x,
+          top: node.position.y,
+          width: 200,
+        }}
+        onClick={() => setSelectedNode(node)}
+      >
+        {/* Входной порт */}
+        <div className="absolute w-3 h-3 bg-gray-400 rounded-full -left-1.5 top-1/2 transform -translate-y-1/2" />
+        
+        {/* Выходной порт (для обычных нод) */}
+        {node.type !== 'if_else' && (
+          <div className="absolute w-3 h-3 bg-gray-400 rounded-full -right-1.5 top-1/2 transform -translate-y-1/2" />
+        )}
+        
+        {/* Специальные порты для If/Else */}
+        {node.type === 'if_else' && (
+          <>
+            <div className="absolute w-3 h-3 bg-green-500 rounded-full -right-1.5" style={{ top: '30%' }} />
+            <div className="absolute w-3 h-3 bg-red-500 rounded-full -right-1.5" style={{ top: '70%' }} />
+          </>
+        )}
+  
+        <div className="flex items-center gap-2 mb-2">
+          <NodeIcon className="w-5 h-5" />
+          <span className="font-medium">{node.data.label || node.type}</span>
+        </div>
+  
+        {/* Кнопки для обычных нод */}
+        {node.type !== 'if_else' && (
+          <div className="flex gap-1">
+            {connecting && connecting !== node.id ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-xs flex-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleConnect(node.id);
+                }}
+              >
+                Target
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-xs flex-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConnecting(node.id);
+                }}
+              >
+                Connect
+              </Button>
+            )}
+          </div>
+        )}
+  
+        {/* Специальные кнопки для If/Else */}
+        {node.type === 'if_else' && (
+          <div className="flex gap-1">
+            {connecting && connecting.startsWith(node.id) ? (
+              // Если уже нажали Connect на этой ноде
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-xs flex-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConnecting(null);
+                }}
+              >
+                Cancel
+              </Button>
+            ) : connecting && !connecting.startsWith(node.id) ? (
+              // Если нажали Connect на другой ноде - показываем Target
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-xs flex-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleConnect(node.id);
+                }}
+              >
+                Target
+              </Button>
+            ) : (
+              // Исходное состояние - две кнопки Connect
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-xs flex-1 text-green-600 hover:bg-green-50"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConnecting(`${node.id}:true`);
+                  }}
+                >
+                  Connect T
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-xs flex-1 text-red-600 hover:bg-red-50"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConnecting(`${node.id}:false`);
+                  }}
+                >
+                  Connect F
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+  
+        {/* Статус выполнения */}
+        {isExecuting && (
+          <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs px-2 py-1 rounded">
+            ✓
+          </div>
+        )}
+      </div>
+    );
+  };  
+  
+  const renderConnection = (connection: Connection) => {
+    const sourceNode = nodes.find((n) => n.id === connection.source)
+    const targetNode = nodes.find((n) => n.id === connection.target)
+  
+    if (!sourceNode || !targetNode) return null
+  
+    // Определяем начальные и конечные координаты
+    let startX = sourceNode.position.x + 200
+    let startY = sourceNode.position.y + 40
+    let endX = targetNode.position.x
+    let endY = targetNode.position.y + 40
+  
+    // Для If/Else ноды используем разные порты
+    if (sourceNode.type === 'if_else') {
+      const connectionLabel = (connection as ConnectionWithLabel).data?.label || '';
+      if (connectionLabel.startsWith('true')) {
+        // Зеленый порт (верхний)
+        startY = sourceNode.position.y + 30;
+      } else if (connectionLabel.startsWith('false')) {
+        // Красный порт (нижний)
+        startY = sourceNode.position.y + 70;
+      }
+    }
+  
+    const midX = (startX + endX) / 2
+    
+    // Определяем статус соединения
+    const sourceExecuted = !!executionResults[connection.source]
+    const targetExecuted = !!executionResults[connection.target]
+    const sourceHasError = executionLogs.some(log => log.nodeId === connection.source && log.status === "error")
+    const targetIsActive = activeNode === connection.target
+    
+    // Определяем стиль соединения
+    let strokeColor = "#6366f1" // Стандартный цвет
+    let strokeWidth = "2"
+    let dashArray = ""
+    
+    // Для goto соединений используем пунктирную линию
+    const isGoto = (connection as ConnectionWithLabel).data?.label?.includes('goto');
+    if (isGoto) {
+      dashArray = "5,5"
+    }
+    
+    if (sourceExecuted && !sourceHasError) {
+      if (targetIsActive) {
+        // Активное соединение (данные передаются)
+        strokeColor = "#16a34a" // Зеленый
+        strokeWidth = "3"
+      } else if (targetExecuted) {
+        // Успешно выполненное соединение
+        strokeColor = "#16a34a" // Зеленый
+      }
+    } else if (sourceHasError) {
+      // Ошибка в исходной ноде
+      strokeColor = "#dc2626" // Красный
+    }
+  
+    // Для If/Else соединений добавляем метку
+    const connectionLabel = (connection as ConnectionWithLabel).data?.label;
+    const showLabel = connectionLabel && sourceNode.type === 'if_else';
+    
+    return (
+      <g key={connection.id} style={{ pointerEvents: 'auto' }}>
+        <path
+          d={`M ${startX} ${startY} C ${midX} ${startY} ${midX} ${endY} ${endX} ${endY}`}
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          strokeDasharray={dashArray}
+          fill="none"
+          markerEnd="url(#arrowhead)"
+        />
+        
+        {/* Метка соединения */}
+        {showLabel && (
+          <text
+            x={midX}
+            y={(startY + endY) / 2 - 10}
+            textAnchor="middle"
+            fill={connectionLabel?.startsWith('true') ? "#16a34a" : "#dc2626"}
+            fontSize="12"
+            fontWeight="bold"
+          >
+            {connectionLabel}
+          </text>
+        )}
+        
+        {/* Кнопка удаления соединения */}
+        <circle
+          cx={midX}
+          cy={(startY + endY) / 2}
+          r="8"
+          fill="white"
+          stroke="#6366f1"
+          strokeWidth="1"
+          style={{ cursor: 'pointer' }}
+          onClick={() => handleDeleteConnection(connection.id)}
+        />
+        <text
+          x={midX}
+          y={(startY + endY) / 2 + 4}
+          textAnchor="middle"
+          fill="#6366f1"
+          fontSize="12"
+          fontWeight="bold"
+          style={{ cursor: 'pointer', pointerEvents: 'none' }}
+        >
+          ×
+        </text>
+      </g>
+    )
+  }
+  
+  const handleDeleteConnection = (connectionId: string) => {
+    setConnections(prev => prev.filter(c => c.id !== connectionId));
+  };
+  const onConnect = useCallback((params: Connection) => {
+    const sourceNode = nodes.find(n => n.id === params.source);
+    
+    if (sourceNode?.type === 'if_else' && draggedConnection?.portType) {
+      // Для If/Else используем тип порта из draggedConnection
+      const isGoto = confirm(
+        `Создать GOTO переход?\n\n` +
+        `ОК - создать ${draggedConnection.portType}:goto (для циклов)\n` +
+        `Отмена - создать обычный ${draggedConnection.portType} переход`
+      );
+      
+      const label = isGoto ? `${draggedConnection.portType}:goto` : draggedConnection.portType;
+      
+      const newConnection: ConnectionWithLabel = {
+        ...params,
+        id: `${params.source}-${params.target}-${Date.now()}`,
+        data: { label }
+      };
+      
+      setConnections((conns) => [...conns, newConnection]);
+    } else {
+      // Обычное соединение для других типов нод
+      const newConnection = {
+        ...params,
+        id: `${params.source}-${params.target}-${Date.now()}`
+      };
+      
+      setConnections((conns) => [...conns, newConnection]);
+    }
+    
+    setDraggedConnection(null);
+  }, [nodes, draggedConnection]);
+  
+  
 
   // Добавьте функцию для создания вебхука
 const createWebhook = async () => {
@@ -462,6 +873,7 @@ useEffect(() => {
       }
     }
   }
+ 
 
   const addNode = (type: string) => {
     const nodeType = nodeTypes.find((nt) => nt.type === type)
@@ -509,6 +921,14 @@ useEffect(() => {
         executionMode: "sequential", // 'sequential' or 'parallel'
         commonHeaders: JSON.stringify({}, null, 2), // Example common
       },
+      if_else: {
+        conditionType: "equals",
+        fieldPath: "output.text",
+        compareValue: "",
+        caseSensitive: false,
+        enableGoto: false,
+        maxGotoIterations: 10
+      }
     }
 
     const newNode: Node = {
@@ -589,67 +1009,18 @@ useEffect(() => {
 
   const completeConnection = (targetNodeId: string) => {
     if (connecting && connecting !== targetNodeId) {
-      const newConnection: Connection = {
-        id: `conn-${Date.now()}`,
-        source: connecting,
-        target: targetNodeId,
-      }
-      setConnections((prev) => [...prev, newConnection])
+      // Используем handleConnect для создания соединения
+      handleConnect(targetNodeId);
     }
-    setConnecting(null)
-  }
+  };
+  
+  
 
   const getNodeTypeInfo = (type: string) => {
     return nodeTypes.find((nt) => nt.type === type) || nodeTypes[0]
   }
 
-  const renderConnection = (connection: Connection) => {
-    const sourceNode = nodes.find((n) => n.id === connection.source)
-    const targetNode = nodes.find((n) => n.id === connection.target)
-
-    if (!sourceNode || !targetNode) return null
-
-    const startX = sourceNode.position.x + 150
-    const startY = sourceNode.position.y + 40
-    const endX = targetNode.position.x
-    const endY = targetNode.position.y + 40
-
-    const midX = (startX + endX) / 2
-    // Определяем статус соединения
-    const sourceExecuted = !!executionResults[connection.source]
-    const targetExecuted = !!executionResults[connection.target]
-    const sourceHasError = executionLogs.some(log => log.nodeId === connection.source && log.status === "error")
-    const targetIsActive = activeNode === connection.target
-    
-    // Определяем стиль соединения
-    let strokeColor = "#6366f1" // Стандартный цвет
-    let strokeWidth = "2"
-    let dashArray = ""
-    
-    if (sourceExecuted && !sourceHasError) {
-      if (targetIsActive) {
-        // Активное соединение (данные передаются)
-        strokeColor = "#16a34a" // Зеленый
-        strokeWidth = "3"
-      } else if (targetExecuted) {
-        // Успешно выполненное соединение
-        strokeColor = "#16a34a" // Зеленый
-      }
-    } else if (sourceHasError) {
-      // Ошибка в исходной ноде
-      strokeColor = "#dc2626" // Красный
-    }
-    return (
-      <path
-        key={connection.id}
-        d={`M ${startX} ${startY} C ${midX} ${startY} ${midX} ${endY} ${endX} ${endY}`}
-        stroke="#6366f1"
-        strokeWidth="2"
-        fill="none"
-        markerEnd="url(#arrowhead)"
-      />
-    )
-  }
+  
 
   const stopExecution = () => {
     if (abortController) {
@@ -671,6 +1042,20 @@ useEffect(() => {
   }
   const saveWorkflow = async () => {
     if (apiStatus === "offline" || nodes.length === 0) return;
+      // Убедись, что все соединения имеют правильные метки для If/Else
+    const connectionsWithLabels = connections.map(conn => {
+    const sourceNode = nodes.find(n => n.id === conn.source);
+    if (sourceNode?.type === 'if_else' && !conn.data?.label) {
+      // Если это соединение от If/Else ноды без метки, добавляем метку по умолчанию
+      console.warn(`⚠️ Соединение от If/Else ноды ${conn.source} не имеет метки. Добавляем метку 'true' по умолчанию.`);
+      return {
+        ...conn,
+        data: { label: 'true' }
+      };
+    }
+    return conn;
+  });
+
   
     try {
       setExecutionLogs((prev) => [
@@ -692,7 +1077,7 @@ useEffect(() => {
         body: JSON.stringify({
           name: workflowName,
           nodes: nodes,
-          connections: connections,
+          connections: connectionsWithLabels,
         }),
       });
   
@@ -739,6 +1124,19 @@ useEffect(() => {
   
   const executeWorkflow = async (startNodeId?: string) => {
     if (nodes.length === 0) return
+    // Убедись, что все соединения имеют правильные метки для If/Else
+    const connectionsWithLabels = connections.map(conn => {
+    const sourceNode = nodes.find(n => n.id === conn.source);
+    if (sourceNode?.type === 'if_else' && !conn.data?.label) {
+      // Если это соединение от If/Else ноды без метки, добавляем метку по умолчанию
+      console.warn(`⚠️ Соединение от If/Else ноды ${conn.source} не имеет метки. Добавляем метку 'true' по умолчанию.`);
+      return {
+        ...conn,
+        data: { label: 'true' }
+      };
+    }
+    return conn;
+  });
     if (apiStatus === "offline") {
       alert("API сервер недоступен. Запустите FastAPI сервер на порту 8000.")
       return
@@ -763,7 +1161,7 @@ useEffect(() => {
         },
         body: JSON.stringify({
           nodes: nodes,
-          connections: connections,
+          connections: connectionsWithLabels,
           startNodeId: startNodeId,
         }),
         signal: controller.signal,
@@ -1066,245 +1464,242 @@ useEffect(() => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                {selectedNode.type === "gigachat" && (
-                  <>
-                    <div>
-                      <Label htmlFor="role">Роль AI</Label>
-                      <Select
-                        value={selectedNode.data.config.role || "assistant"}
-                        onValueChange={(value) => {
-                          const role = gigaChatRoles.find(r => r.id === value);
-                          if (role && value !== "custom") {
-                            // Обновляем все поля сразу
-                            setNodes((prev) =>
-                              prev.map((node) =>
-                                node.id === selectedNode.id
+                  {selectedNode.type === "gigachat" && (
+                    <>
+                      <div>
+                        <Label htmlFor="role">Роль AI</Label>
+                        <Select
+                          value={selectedNode.data.config.role || "assistant"}
+                          onValueChange={(value) => {
+                            const role = gigaChatRoles.find(r => r.id === value);
+                            if (role && value !== "custom") {
+                              // Обновляем все поля сразу
+                              setNodes((prev) =>
+                                prev.map((node) =>
+                                  node.id === selectedNode.id
+                                    ? {
+                                        ...node,
+                                        data: {
+                                          ...node.data,
+                                          config: {
+                                            ...node.data.config,
+                                            role: value,
+                                            systemMessage: role.systemMessage,
+                                            userMessage: role.userMessage
+                                          }
+                                        }
+                                      }
+                                    : node
+                                )
+                              );
+                              setSelectedNode((prev) =>
+                                prev
                                   ? {
-                                      ...node,
+                                      ...prev,
                                       data: {
-                                        ...node.data,
+                                        ...prev.data,
                                         config: {
-                                          ...node.data.config,
+                                          ...prev.data.config,
                                           role: value,
                                           systemMessage: role.systemMessage,
                                           userMessage: role.userMessage
                                         }
                                       }
                                     }
-                                  : node
-                              )
-                            );
-                            setSelectedNode((prev) =>
-                              prev
-                                ? {
-                                    ...prev,
-                                    data: {
-                                      ...prev.data,
-                                      config: {
-                                        ...prev.data.config,
-                                        role: value,
-                                        systemMessage: role.systemMessage,
-                                        userMessage: role.userMessage
-                                      }
-                                    }
-                                  }
-                                : null
-                            );
-                          } else {
-                            updateNodeConfig("role", value);
-                          }
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Выберите роль" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {gigaChatRoles.map((role) => (
-                            <SelectItem key={role.id} value={role.id}>
-                              {role.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Выберите готовую роль или создайте свою
-                      </p>
-                    </div>
-                    
-                    <div>
-                      <Label htmlFor="authToken">Auth Token</Label>
-                      <Input
-                        id="authToken"
-                        type="password"
-                        placeholder="Введите токен авторизации"
-                        value={selectedNode.data.config.authToken || ""}
-                        onChange={(e) => updateNodeConfig("authToken", e.target.value)}
-                      />
-                      <p className="text-xs text-gray-500 mt-1">Base64 токен для доступа к GigaChat API</p>
-                    </div>
-                    
-                    <div>
-                      <Label htmlFor="systemMessage">System Message</Label>
-                      <Textarea
-                        id="systemMessage"
-                        placeholder="Ты полезный ассистент..."
-                        value={selectedNode.data.config.systemMessage || ""}
-                        onChange={(e) => updateNodeConfig("systemMessage", e.target.value)}
-                        rows={3}
-                        disabled={selectedNode.data.config.role && selectedNode.data.config.role !== "custom"}
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        {selectedNode.data.config.role && selectedNode.data.config.role !== "custom" 
-                          ? "Автоматически заполнено для выбранной роли" 
-                          : "Системное сообщение для настройки поведения AI"}
-                      </p>
-                    </div>
-                    
-                    <div>
-                      <Label htmlFor="userMessage">User Message</Label>
-                      <Textarea
-                        id="userMessage"
-                        placeholder="Введите ваш вопрос..."
-                        value={selectedNode.data.config.userMessage || ""}
-                        onChange={(e) => updateNodeConfig("userMessage", e.target.value)}
-                        rows={3}
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        {selectedNode.data.config.role && selectedNode.data.config.role !== "custom" 
-                          ? "Можете изменить пример сообщения" 
-                          : "Сообщение пользователя для отправки в GigaChat"}
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="clearHistory"
-                        checked={selectedNode.data.config.clearHistory || false}
-                        onCheckedChange={(checked) => updateNodeConfig("clearHistory", checked)}
-                      />
-                      <Label htmlFor="clearHistory">Clear History</Label>
-                    </div>
-                    <p className="text-xs text-gray-500">Очистить историю диалога перед отправкой запроса</p>
-                  </>
-                )}
+                                  : null
+                              );
+                            } else {
+                              updateNodeConfig("role", value);
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Выберите роль" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {gigaChatRoles.map((role) => (
+                              <SelectItem key={role.id} value={role.id}>
+                                {role.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Выберите готовую роль или создайте свою
+                        </p>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="authToken">Auth Token</Label>
+                        <Input
+                          id="authToken"
+                          type="password"
+                          placeholder="Введите токен авторизации"
+                          value={selectedNode.data.config.authToken || ""}
+                          onChange={(e) => updateNodeConfig("authToken", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Base64 токен для доступа к GigaChat API</p>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="systemMessage">System Message</Label>
+                        <Textarea
+                          id="systemMessage"
+                          placeholder="Ты полезный ассистент..."
+                          value={selectedNode.data.config.systemMessage || ""}
+                          onChange={(e) => updateNodeConfig("systemMessage", e.target.value)}
+                          rows={3}
+                          disabled={selectedNode.data.config.role && selectedNode.data.config.role !== "custom"}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          {selectedNode.data.config.role && selectedNode.data.config.role !== "custom" 
+                            ? "Автоматически заполнено для выбранной роли" 
+                            : "Системное сообщение для настройки поведения AI"}
+                        </p>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="userMessage">User Message</Label>
+                        <Textarea
+                          id="userMessage"
+                          placeholder="Введите ваш вопрос..."
+                          value={selectedNode.data.config.userMessage || ""}
+                          onChange={(e) => updateNodeConfig("userMessage", e.target.value)}
+                          rows={3}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          {selectedNode.data.config.role && selectedNode.data.config.role !== "custom" 
+                            ? "Можете изменить пример сообщения" 
+                            : "Сообщение пользователя для отправки в GigaChat"}
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="clearHistory"
+                          checked={selectedNode.data.config.clearHistory || false}
+                          onCheckedChange={(checked) => updateNodeConfig("clearHistory", checked)}
+                        />
+                        <Label htmlFor="clearHistory">Clear History</Label>
+                      </div>
+                      <p className="text-xs text-gray-500">Очистить историю диалога перед отправкой запроса</p>
+                    </>
+                  )}
+                  {selectedNode.type === "webhook_trigger" && (
+                    <>
+                      <div>
+                        <Label>Webhook Status</Label>
+                        {selectedNode.data.config.webhookUrl ? (
+                          <div className="space-y-2">
+                            <div className="p-3 bg-green-50 rounded-md">
+                              <p className="text-sm font-medium text-green-800">✅ Webhook активен</p>
+                              <p className="text-xs text-green-600 mt-1 break-all">
+                                {selectedNode.data.config.webhookUrl}
+                              </p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full"
+                              onClick={() => {
+                                navigator.clipboard.writeText(selectedNode.data.config.webhookUrl);
+                                alert("URL скопирован в буфер обмена");
+                              }}
+                            >
+                              <ExternalLink className="w-3 h-3 mr-2" />
+                              Копировать URL
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-gray-50 rounded-md">
+                            <p className="text-sm text-gray-600">
+                              Webhook не создан. Нажмите "Create Webhook" в верхней панели.
+                            </p>
+                          </div>
+                        )}
+                      </div>
 
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="authRequired"
+                          checked={selectedNode.data.config.authRequired || false}
+                          onCheckedChange={(checked) => updateNodeConfig("authRequired", checked)}
+                        />
+                        <Label htmlFor="authRequired">Требовать авторизацию</Label>
+                      </div>
 
-{selectedNode.type === "webhook_trigger" && (
-  <>
-    <div>
-      <Label>Webhook Status</Label>
-      {selectedNode.data.config.webhookUrl ? (
-        <div className="space-y-2">
-          <div className="p-3 bg-green-50 rounded-md">
-            <p className="text-sm font-medium text-green-800">✅ Webhook активен</p>
-            <p className="text-xs text-green-600 mt-1 break-all">
-              {selectedNode.data.config.webhookUrl}
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => {
-              navigator.clipboard.writeText(selectedNode.data.config.webhookUrl);
-              alert("URL скопирован в буфер обмена");
-            }}
-          >
-            <ExternalLink className="w-3 h-3 mr-2" />
-            Копировать URL
-          </Button>
-        </div>
-      ) : (
-        <div className="p-3 bg-gray-50 rounded-md">
-          <p className="text-sm text-gray-600">
-            Webhook не создан. Нажмите "Create Webhook" в верхней панели.
-          </p>
-        </div>
-      )}
-    </div>
+                      <div>
+                        <Label htmlFor="allowedIps">Разрешенные IP адреса</Label>
+                        <Textarea
+                          id="allowedIps"
+                          placeholder="192.168.1.1&#10;10.0.0.1"
+                          value={selectedNode.data.config.allowedIps || ""}
+                          onChange={(e) => updateNodeConfig("allowedIps", e.target.value)}
+                          rows={3}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Оставьте пустым для доступа с любых IP. Каждый IP с новой строки.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                  {selectedNode.type === "webhook" && (
+                    <>
+                      <div>
+                        <Label htmlFor="url">Target URL</Label>
+                        <Input
+                          id="url"
+                          placeholder="https://api.example.com/endpoint/{{input.output.id}}"
+                          value={selectedNode.data.config.url || ""}
+                          onChange={(e) => updateNodeConfig("url", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          URL для отправки запроса. Поддерживает шаблоны: {"{{input.output.field}}"}
+                        </p>
+                      </div>
 
-    <div className="flex items-center space-x-2">
-      <Switch
-        id="authRequired"
-        checked={selectedNode.data.config.authRequired || false}
-        onCheckedChange={(checked) => updateNodeConfig("authRequired", checked)}
-      />
-      <Label htmlFor="authRequired">Требовать авторизацию</Label>
-    </div>
+                      <div>
+                        <Label htmlFor="method">HTTP Method</Label>
+                        <Select
+                          value={selectedNode.data.config.method || "POST"}
+                          onValueChange={(value) => updateNodeConfig("method", value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="POST" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="GET">GET</SelectItem>
+                            <SelectItem value="POST">POST</SelectItem>
+                            <SelectItem value="PUT">PUT</SelectItem>
+                            <SelectItem value="PATCH">PATCH</SelectItem>
+                            <SelectItem value="DELETE">DELETE</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-    <div>
-      <Label htmlFor="allowedIps">Разрешенные IP адреса</Label>
-      <Textarea
-        id="allowedIps"
-        placeholder="192.168.1.1&#10;10.0.0.1"
-        value={selectedNode.data.config.allowedIps || ""}
-        onChange={(e) => updateNodeConfig("allowedIps", e.target.value)}
-        rows={3}
-      />
-      <p className="text-xs text-gray-500 mt-1">
-        Оставьте пустым для доступа с любых IP. Каждый IP с новой строки.
-      </p>
-    </div>
-  </>
-)}
-{selectedNode.type === "webhook" && (
-  <>
-    <div>
-      <Label htmlFor="url">Target URL</Label>
-      <Input
-        id="url"
-        placeholder="https://api.example.com/endpoint/{{input.output.id}}"
-        value={selectedNode.data.config.url || ""}
-        onChange={(e) => updateNodeConfig("url", e.target.value)}
-      />
-      <p className="text-xs text-gray-500 mt-1">
-        URL для отправки запроса. Поддерживает шаблоны: {"{{input.output.field}}"}
-      </p>
-    </div>
+                      <div>
+                        <Label htmlFor="headers">Headers</Label>
+                        <Textarea
+                          id="headers"
+                          placeholder="Content-Type: application/json&#10;Authorization: Bearer {{input.output.token}}"
+                          value={selectedNode.data.config.headers || "Content-Type: application/json"}
+                          onChange={(e) => updateNodeConfig("headers", e.target.value)}
+                          rows={3}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Заголовки запроса (каждый с новой строки). Поддерживает шаблоны.
+                        </p>
+                      </div>
 
-    <div>
-      <Label htmlFor="method">HTTP Method</Label>
-      <Select
-        value={selectedNode.data.config.method || "POST"}
-        onValueChange={(value) => updateNodeConfig("method", value)}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="POST" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="GET">GET</SelectItem>
-          <SelectItem value="POST">POST</SelectItem>
-          <SelectItem value="PUT">PUT</SelectItem>
-          <SelectItem value="PATCH">PATCH</SelectItem>
-          <SelectItem value="DELETE">DELETE</SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
-
-    <div>
-      <Label htmlFor="headers">Headers</Label>
-      <Textarea
-        id="headers"
-        placeholder="Content-Type: application/json&#10;Authorization: Bearer {{input.output.token}}"
-        value={selectedNode.data.config.headers || "Content-Type: application/json"}
-        onChange={(e) => updateNodeConfig("headers", e.target.value)}
-        rows={3}
-      />
-      <p className="text-xs text-gray-500 mt-1">
-        Заголовки запроса (каждый с новой строки). Поддерживает шаблоны.
-      </p>
-    </div>
-
-    <Alert className="mt-4">
-      <AlertCircle className="h-4 w-4" />
-      <AlertDescription className="text-xs">
-        Эта нода отправляет HTTP запрос на указанный URL с данными от предыдущей ноды.
-        Используйте шаблоны {"{{input.output.field}}"} для динамических значений.
-      </AlertDescription>
-    </Alert>
-  </>
-)}
-
+                      <Alert className="mt-4">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription className="text-xs">
+                          Эта нода отправляет HTTP запрос на указанный URL с данными от предыдущей ноды.
+                          Используйте шаблоны {"{{input.output.field}}"} для динамических значений.
+                        </AlertDescription>
+                      </Alert>
+                    </>
+                  )}
                   {selectedNode.type === "email" && (
                     <>
                       <div>
@@ -1605,7 +2000,146 @@ useEffect(() => {
     </Alert>
   </>
                   )}
+                  {selectedNode.type === "if_else" && (
+                                      <>
+                                        <div className="space-y-4">
+                                          <div>
+                                            <Label htmlFor="conditionType">Тип условия</Label>
+                                            <Select
+                                              value={selectedNode.data.config.conditionType || "equals"}
+                                              onValueChange={(value) => updateNodeConfig("conditionType", value)}
+                                            >
+                                              <SelectTrigger id="conditionType">
+                                                <SelectValue />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="equals">Равно (=)</SelectItem>
+                                                <SelectItem value="not_equals">Не равно (≠)</SelectItem>
+                                                <SelectItem value="contains">Содержит текст</SelectItem>
+                                                <SelectItem value="not_contains">Не содержит текст</SelectItem>
+                                                <SelectItem value="greater">{`Больше (>)`}</SelectItem>
+                                                <SelectItem value="less">{`Меньше (<)`}</SelectItem>
+                                                <SelectItem value="regex">Регулярное выражение</SelectItem>
+                                                <SelectItem value="exists">Поле существует</SelectItem>
+                                                <SelectItem value="is_empty">Поле пустое</SelectItem>
+                                                <SelectItem value="is_not_empty">Поле не пустое</SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
 
+                                          <div>
+                                            <Label htmlFor="fieldPath">Путь к полю для проверки</Label>
+                                            <Input
+                                              id="fieldPath"
+                                              placeholder="output.text"
+                                              value={selectedNode.data.config.fieldPath || "output.text"}
+                                              onChange={(e) => updateNodeConfig("fieldPath", e.target.value)}
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">
+                                              Путь к данным из предыдущей ноды. Примеры:
+                                              <br />• output.text - текст ответа
+                                              <br />• output.status - статус код
+                                              <br />• output.json.items[0].id - вложенные данные
+                                            </p>
+                                          </div>
+
+                                          <div>
+                                            <Label htmlFor="compareValue">Значение для сравнения</Label>
+                                            <Input
+                                              id="compareValue"
+                                              placeholder="Введите значение"
+                                              value={selectedNode.data.config.compareValue || ""}
+                                              onChange={(e) => updateNodeConfig("compareValue", e.target.value)}
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">
+                                              Оставьте пустым для условий "exists", "is_empty", "is_not_empty"
+                                            </p>
+                                          </div>
+
+                                          <div className="flex items-center space-x-2">
+                                            <Switch
+                                              id="caseSensitive"
+                                              checked={selectedNode.data.config.caseSensitive || false}
+                                              onCheckedChange={(checked) => updateNodeConfig("caseSensitive", checked)}
+                                            />
+                                            <Label htmlFor="caseSensitive">Учитывать регистр букв</Label>
+                                          </div>
+
+                                          <div>
+                                            <Label htmlFor="maxGotoIterations">Максимум goto переходов (защита от циклов)</Label>
+                                            <Input
+                                              id="maxGotoIterations"
+                                              type="number"
+                                              min="1"
+                                              max="100"
+                                              value={selectedNode.data.config.maxGotoIterations || 10}
+                                              onChange={(e) => updateNodeConfig("maxGotoIterations", parseInt(e.target.value))}
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">
+                                              Если используете goto для циклов, это предотвратит бесконечные циклы
+                                            </p>
+                                          </div>
+
+                                          {/* Информация о соединениях */}
+                                          <div className="border-t pt-4">
+                                            <h4 className="font-medium mb-2">Как использовать:</h4>
+                                            <div className="text-sm text-gray-600 space-y-1">
+                                              <p>1. Потяните от <span className="text-green-600 font-bold">зеленого порта (T)</span> для TRUE ветки</p>
+                                              <p>2. Потяните от <span className="text-red-600 font-bold">красного порта (F)</span> для FALSE ветки</p>
+                                              <p>3. При создании соединения выберите:</p>
+                                              <ul className="ml-4 list-disc">
+                                                <li><strong>Обычный переход</strong> - для линейного выполнения</li>
+                                                <li><strong>GOTO переход</strong> - для создания циклов</li>
+                                              </ul>
+                                            </div>
+                                          </div>
+                                          
+
+                                          <div className="flex items-center space-x-2">
+                    <Switch
+                      id="enableGoto"
+                      checked={selectedNode.data.config.enableGoto || false}
+                      onCheckedChange={(checked) => updateNodeConfig("enableGoto", checked)}
+                    />
+                    <Label htmlFor="enableGoto">Включить GOTO режим (для циклов)</Label>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Позволяет создавать циклические переходы обратно к предыдущим нодам
+                  </p>
+
+                                          {/* Текущие соединения */}
+                                          <div className="border-t pt-4">
+                                            <h4 className="font-medium mb-2">Текущие соединения:</h4>
+                                            <div className="text-sm space-y-1">
+                                              {connections
+                                                .filter(c => c.source === selectedNode.id)
+                                                .map(conn => {
+                                                  const targetNode = nodes.find(n => n.id === conn.target);
+                                                  const label = conn.data?.label || 'обычное';
+                                                  const color = label.startsWith('true') ? 'text-green-600' : 'text-red-600';
+                                                  const isGoto = label.includes('goto');
+                                                  
+                                                  return (
+                                                    <div key={conn.id} className="flex items-center gap-2">
+                                                      <span className={`${color} font-medium`}>
+                                                        {label}
+                                                      </span>
+                                                      <span>→</span>
+                                                      <span className="font-medium">
+                                                        {targetNode?.data.label || targetNode?.type || conn.target}
+                                                      </span>
+                                                      {isGoto && <span className="text-purple-600 text-xs">(GOTO)</span>}
+                                                    </div>
+                                                  );
+                                                })}
+                                              {connections.filter(c => c.source === selectedNode.id).length === 0 && (
+                                                <p className="text-gray-500">Нет соединений</p>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </>
+                  )}               
                 </CardContent>
               </Card>
             </div>
@@ -1702,68 +2236,134 @@ useEffect(() => {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-0">
-                      <div className="flex justify-between items-center">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-xs"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            startConnection(node.id)
-                          }}
-                        >
-                          Connect
-                        </Button>
-                        {connecting && connecting !== node.id && (
-                          <Button
-                            variant="default"
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              completeConnection(node.id)
-                            }}
-                          >
-                            Target
-                          </Button>
-                        )}
-                        {nodeTypeInfo.canStart && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              executeNode(node.id)
-                            }}
-                            disabled={isExecuting || apiStatus === "offline"}
-                          >
-                            <Play className="w-3 h-3" />
-                          </Button>
-                        )}
-                      </div>
-                      {executionResults[node.id] && (
-                        <div className="mt-2 flex justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedResult({
-                                nodeId: node.id,
-                                data: executionResults[node.id]
-                              });
-                            }}
-                            title="Просмотр результатов"
-                          >
-                            <ExternalLink className="w-3 h-3 mr-1" />
-                            Результаты
-                          </Button>
-                        </div>
-                      )}
+  <div className="flex justify-between items-center">
+    {node.type === 'if_else' ? (
+      // Специальные кнопки для If/Else
+      <>
+        {connecting && connecting.startsWith(node.id) ? (
+          // Если уже нажали Connect на этой ноде - показываем Cancel
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs w-full"
+            onClick={(e) => {
+              e.stopPropagation()
+              setConnecting(null)
+            }}
+          >
+            Cancel
+          </Button>
+        ) : connecting && !connecting.startsWith(node.id) ? (
+          // Если нажали Connect на другой ноде - показываем Target
+          <Button
+            variant="default"
+            size="sm"
+            className="h-6 text-xs w-full"
+            onClick={(e) => {
+              e.stopPropagation()
+              completeConnection(node.id)
+            }}
+          >
+            Target
+          </Button>
+        ) : (
+          // Исходное состояние - две кнопки Connect
+          <div className="flex gap-1 w-full">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs flex-1 text-green-600 hover:bg-green-50"
+              onClick={(e) => {
+                e.stopPropagation()
+                setConnecting(`${node.id}:true`)
+              }}
+            >
+              True
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs flex-1 text-red-600 hover:bg-red-50"
+              onClick={(e) => {
+                e.stopPropagation()
+                setConnecting(`${node.id}:false`)
+              }}
+            >
+              False
+            </Button>
+          </div>
+        )}
+      </>
+    ) : (
+      // Обычные кнопки для остальных нод
+      <>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 text-xs"
+          onClick={(e) => {
+            e.stopPropagation()
+            startConnection(node.id)
+          }}
+        >
+          Connect
+        </Button>
+        {connecting && connecting !== node.id && (
+          <Button
+            variant="default"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={(e) => {
+              e.stopPropagation()
+              completeConnection(node.id)
+            }}
+          >
+            Target
+          </Button>
+        )}
+      </>
+    )}
+    
+    {/* Кнопка Play для нод, которые могут стартовать */}
+    {nodeTypeInfo.canStart && (
+      <Button
+        variant="secondary"
+        size="sm"
+        className="h-6 text-xs ml-2"
+        onClick={(e) => {
+          e.stopPropagation()
+          executeNode(node.id)
+        }}
+        disabled={isExecuting || apiStatus === "offline"}
+      >
+        <Play className="w-3 h-3" />
+      </Button>
+    )}
+  </div>
+  
+  {/* Блок с результатами остается без изменений */}
+  {executionResults[node.id] && (
+    <div className="mt-2 flex justify-end">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 text-xs"
+        onClick={(e) => {
+          e.stopPropagation();
+          setSelectedResult({
+            nodeId: node.id,
+            data: executionResults[node.id]
+          });
+        }}
+        title="Просмотр результатов"
+      >
+        <ExternalLink className="w-3 h-3 mr-1" />
+        Результаты
+      </Button>
+    </div>
+  )}
+</CardContent>
 
-                    </CardContent>
                   </Card>
                 </div>
               )

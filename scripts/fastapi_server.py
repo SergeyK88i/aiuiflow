@@ -34,6 +34,8 @@ saved_workflows = {}
 # Добавьте эту глобальную переменную для хранения последних результатов выполнения нод
 node_execution_results = {}
 
+goto_execution_counter = {} 
+
 # Расширьте глобальное хранилище webhook_triggers (около строки 40)
 webhook_triggers: Dict[str, Dict[str, Any]] = {}
 # Добавьте статистику вебхуков
@@ -62,6 +64,12 @@ class NodeConfig(BaseModel):
     baseUrl: Optional[str] = None
     executionMode: Optional[str] = "sequential" # New: 'sequential' or 'parallel'
     commonHeaders: Optional[str] = None # New: JSON string for common headers
+    # Для If/Else ноды
+    conditionType: Optional[str] = "equals"
+    fieldPath: Optional[str] = "output.text"
+    compareValue: Optional[str] = ""
+    caseSensitive: Optional[bool] = False
+    maxGotoIterations: Optional[int] = 3  # Защита от бесконечных циклов
 
 class Node(BaseModel):
     id: str
@@ -73,6 +81,7 @@ class Connection(BaseModel):
     id: str
     source: str
     target: str
+    data: Optional[Dict[str, Any]] = {}  # Добавляем поддержку data для меток
 
 class WorkflowExecuteRequest(BaseModel):
     nodes: List[Node]
@@ -1050,6 +1059,110 @@ class NodeExecutors:
         
         return result
 
+    async def execute_if_else(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Выполнение If/Else ноды"""
+        config = node.data.get('config', {})
+        condition_type = config.get('conditionType', 'equals')
+        field_path = config.get('fieldPath', 'output.text')
+        compare_value = config.get('compareValue', '')
+        case_sensitive = config.get('caseSensitive', False)
+        
+        logger.info(f"🔀 Выполнение If/Else ноды: {node.id}")
+        logger.info(f"📋 Условие: {field_path} {condition_type} {compare_value}")
+        
+        # Получаем значение по пути
+        def get_value_by_path(data: Dict[str, Any], path: str) -> Any:
+            keys = path.split('.')
+            current = data
+            
+            for key in keys:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                elif isinstance(current, list) and key.isdigit():
+                    index = int(key)
+                    if 0 <= index < len(current):
+                        current = current[index]
+                    else:
+                        return None
+                else:
+                    return None
+            
+            return current
+        
+        actual_value = get_value_by_path(input_data, field_path)
+        
+        if actual_value is None and condition_type not in ['exists', 'is_empty']:
+            logger.warning(f"⚠️ Поле {field_path} не найдено в данных")
+            actual_value = ""
+        
+        # Приводим к строке для сравнения (если не число)
+        if condition_type not in ['greater', 'greater_equal', 'less', 'less_equal']:
+            actual_value_str = str(actual_value) if actual_value is not None else ""
+            compare_value_str = str(compare_value)
+            
+            if not case_sensitive:
+                actual_value_str = actual_value_str.lower()
+                compare_value_str = compare_value_str.lower()
+        else:
+            # Для числовых сравнений
+            try:
+                actual_value_str = float(actual_value)
+                compare_value_str = float(compare_value)
+            except (ValueError, TypeError):
+                actual_value_str = 0
+                compare_value_str = 0
+        
+        # Проверяем условие
+        result = False
+        
+        if condition_type == 'equals':
+            result = actual_value_str == compare_value_str
+        elif condition_type == 'not_equals':
+            result = actual_value_str != compare_value_str
+        elif condition_type == 'contains':
+            result = compare_value_str in actual_value_str
+        elif condition_type == 'not_contains':
+            result = compare_value_str not in actual_value_str
+        elif condition_type == 'greater':
+            result = actual_value_str > compare_value_str
+        elif condition_type == 'greater_equal':
+            result = actual_value_str >= compare_value_str
+        elif condition_type == 'less':
+            result = actual_value_str < compare_value_str
+        elif condition_type == 'less_equal':
+            result = actual_value_str <= compare_value_str
+        elif condition_type == 'regex':
+            import re
+            try:
+                result = bool(re.search(compare_value, str(actual_value)))
+            except re.error:
+                result = False
+        elif condition_type == 'exists':
+            result = actual_value is not None
+        elif condition_type == 'is_empty':
+            result = actual_value is None or str(actual_value).strip() == ""
+        elif condition_type == 'is_not_empty':
+            result = actual_value is not None and str(actual_value).strip() != ""
+        
+        branch = 'true' if result else 'false'
+        
+        logger.info(f"📊 Результат проверки: {result} (ветка: {branch})")
+        logger.info(f"📍 Фактическое значение: {actual_value}")
+        logger.info(f"📍 Ожидаемое значение: {compare_value}")
+        
+        return {
+            'success': True,
+            'branch': branch,
+            'condition_met': result,
+            'checked_value': str(actual_value),
+            'condition': f"{field_path} {condition_type} {compare_value}",
+            'output': {
+                'text': f"Condition {condition_type} {'met' if result else 'not met'}: {actual_value}",
+                'branch': branch,
+                'result': result
+            }
+        }
+
 # Глобальный экземпляр исполнителей
 executors = NodeExecutors()
 
@@ -1091,7 +1204,8 @@ async def execute_node(
             'webhook': executors.execute_webhook,
             'timer': executors.execute_timer,
             'join': executors.execute_join,
-            'request_iterator': executors.execute_request_iterator
+            'request_iterator': executors.execute_request_iterator,
+            'if_else': executors.execute_if_else  # Добавляем новый исполнитель
         }
 
         executor = executor_map.get(node_type)
@@ -1407,6 +1521,10 @@ async def update_webhook(webhook_id: str, request: WebhookCreateRequest):
 async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_input_data: Optional[Dict[str, Any]] = None):
     """Внутренняя функция выполнения workflow (без HTTP обертки)"""
     logs = []
+    # НОВОЕ: Очищаем счетчики goto при новом выполнении
+    global goto_execution_counter
+    goto_execution_counter.clear()
+
     try:
         logger.info(f"🚀 Запуск workflow с {len(request.nodes)} нодами")
         if initial_input_data:
@@ -1541,7 +1659,8 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                 'webhook': executors.execute_webhook,
                 'timer': executors.execute_timer,
                 'join': executors.execute_join,
-                'request_iterator': executors.execute_request_iterator
+                'request_iterator': executors.execute_request_iterator,
+                'if_else': executors.execute_if_else 
             }
 
             executor = executor_map.get(node.type)
@@ -1558,8 +1677,63 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
 
                 # Находим следующие ноды
                 next_connections = [c for c in request.connections if c.source == node_id]
-                for connection in next_connections:
-                    await execute_node_recursive(connection.target, result, node_id)
+
+                # НОВОЕ: Специальная обработка для If/Else ноды
+                if node.type == 'if_else' and 'branch' in result:
+                    branch = result['branch']  # 'true' или 'false'
+                    
+                    # ДОБАВЬТЕ ЗДЕСЬ (после строки 1097):
+                    logger.info(f"🔍 If/Else нода {node_id} вернула branch: {branch}")
+                    logger.info(f"🔍 Найдено соединений: {len(next_connections)}")
+                    for conn in next_connections:
+                        logger.info(f"  - {conn.id}: label='{conn.data.get('label', 'none')}'")
+
+                    # Фильтруем соединения по метке
+                    filtered_connections = []
+                    goto_connections = []
+                    
+                    for conn in next_connections:
+                        conn_label = conn.data.get('label', '').lower() if conn.data else ''
+                        
+                        # Проверяем goto соединения
+                        if conn_label == f"{branch}:goto":
+                            goto_connections.append(conn)
+                        elif conn_label == branch:
+                            filtered_connections.append(conn)
+                    
+                    # Сначала проверяем goto соединения
+                    if goto_connections:
+                        for goto_conn in goto_connections:
+                            # Проверяем защиту от циклов
+                            goto_key = f"{node_id}_to_{goto_conn.target}"
+                            if goto_key not in goto_execution_counter:
+                                goto_execution_counter[goto_key] = 0
+                            
+                            goto_execution_counter[goto_key] += 1
+                            max_iterations = node.data.get('config', {}).get('maxGotoIterations', 10)
+                            
+                            if goto_execution_counter[goto_key] > max_iterations:
+                                logger.error(f"🔄 Превышен лимит goto переходов ({max_iterations}) для {goto_key}")
+                                return {
+                                    'success': False,
+                                    'error': f'Exceeded max goto iterations ({max_iterations})',
+                                    'branch': branch,
+                                    'goto_iterations': goto_execution_counter[goto_key]
+                                }
+                            
+                            logger.info(f"🔄 Активирован goto переход к {goto_conn.target} (итерация {goto_execution_counter[goto_key]})")
+                            await execute_node_recursive(goto_conn.target, result, node_id, False)
+                        
+                        # После goto не выполняем обычные соединения
+                        return result
+                    
+                    # Если нет goto, выполняем обычные соединения
+                    for connection in filtered_connections:
+                        await execute_node_recursive(connection.target, result, node_id)
+                else:
+                    # Для остальных типов нод - обычное выполнение
+                    for connection in next_connections:
+                        await execute_node_recursive(connection.target, result, node_id)
 
                 return result
             else:
