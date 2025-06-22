@@ -163,13 +163,12 @@ const gigaChatRoles = [
 
 export default function WorkflowEditor() {
   const [nodes, setNodes] = useState<Node[]>([])
-  const [connections, setConnections] = useState<Connection[]>([])
+  const [connections, setConnections] = useState<ConnectionWithLabel[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [draggedNode, setDraggedNode] = useState<Node | null>(null)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [connecting, setConnecting] = useState<string | null>(null)
   const [workflowName, setWorkflowName] = useState("GigaChat Workflow")
-  const [connectionsWithLabel, setConnectionsWithLabel] = useState<ConnectionWithLabel[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null)
   // Добавьте в компонент состояние для вебхуков
   const [webhooks, setWebhooks] = useState<Array<{
@@ -249,153 +248,24 @@ const handleConnect = (targetId: string) => {
   setConnecting(null);
 };
   
-  const [draggedConnection, setDraggedConnection] = useState<{
-    sourceId: string;
-    portType?: string;
-  } | null>(null);
+  
+const getSanitizedConnections = () => {
+  return connections.map(conn => {
+    const sourceNode = nodes.find(n => n.id === conn.source);
+    if (sourceNode?.type === 'if_else' && !conn.data?.label) {
+      console.warn(`⚠️ Соединение от If/Else ноды ${conn.source} не имеет метки. Добавляем метку 'true' по умолчанию.`);
+      return {
+        ...conn,
+        data: { label: 'true' }
+      };
+    }
+    return conn;
+  });
+};
 
-  const renderNode = (node: Node) => {
-    const isSelected = selectedNode?.id === node.id;
-    const nodeResult = executionResults[node.id];
-    const isExecuting = nodeResult?.status === "success";
   
-    const NodeIcon = nodeTypes.find((t) => t.type === node.type)?.icon || Box;
   
-    return (
-      <div
-        key={node.id}
-        className={`absolute bg-white rounded-lg shadow-lg border-2 p-4 ${
-          isSelected ? "border-blue-500" : "border-gray-200"
-        } ${isExecuting ? "animate-pulse border-green-500" : ""}`}
-        style={{
-          left: node.position.x,
-          top: node.position.y,
-          width: 200,
-        }}
-        onClick={() => setSelectedNode(node)}
-      >
-        {/* Входной порт */}
-        <div className="absolute w-3 h-3 bg-gray-400 rounded-full -left-1.5 top-1/2 transform -translate-y-1/2" />
-        
-        {/* Выходной порт (для обычных нод) */}
-        {node.type !== 'if_else' && (
-          <div className="absolute w-3 h-3 bg-gray-400 rounded-full -right-1.5 top-1/2 transform -translate-y-1/2" />
-        )}
-        
-        {/* Специальные порты для If/Else */}
-        {node.type === 'if_else' && (
-          <>
-            <div className="absolute w-3 h-3 bg-green-500 rounded-full -right-1.5" style={{ top: '30%' }} />
-            <div className="absolute w-3 h-3 bg-red-500 rounded-full -right-1.5" style={{ top: '70%' }} />
-          </>
-        )}
-  
-        <div className="flex items-center gap-2 mb-2">
-          <NodeIcon className="w-5 h-5" />
-          <span className="font-medium">{node.data.label || node.type}</span>
-        </div>
-  
-        {/* Кнопки для обычных нод */}
-        {node.type !== 'if_else' && (
-          <div className="flex gap-1">
-            {connecting && connecting !== node.id ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-xs flex-1"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleConnect(node.id);
-                }}
-              >
-                Target
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-xs flex-1"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConnecting(node.id);
-                }}
-              >
-                Connect
-              </Button>
-            )}
-          </div>
-        )}
-  
-        {/* Специальные кнопки для If/Else */}
-        {node.type === 'if_else' && (
-          <div className="flex gap-1">
-            {connecting && connecting.startsWith(node.id) ? (
-              // Если уже нажали Connect на этой ноде
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-xs flex-1"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConnecting(null);
-                }}
-              >
-                Cancel
-              </Button>
-            ) : connecting && !connecting.startsWith(node.id) ? (
-              // Если нажали Connect на другой ноде - показываем Target
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-xs flex-1"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleConnect(node.id);
-                }}
-              >
-                Target
-              </Button>
-            ) : (
-              // Исходное состояние - две кнопки Connect
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 text-xs flex-1 text-green-600 hover:bg-green-50"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConnecting(`${node.id}:true`);
-                  }}
-                >
-                  Connect T
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 text-xs flex-1 text-red-600 hover:bg-red-50"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConnecting(`${node.id}:false`);
-                  }}
-                >
-                  Connect F
-                </Button>
-              </>
-            )}
-          </div>
-        )}
-  
-        {/* Статус выполнения */}
-        {isExecuting && (
-          <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs px-2 py-1 rounded">
-            ✓
-          </div>
-        )}
-      </div>
-    );
-  };  
-  
-  const renderConnection = (connection: Connection) => {
+  const renderConnection = (connection: ConnectionWithLabel) => {
     const sourceNode = nodes.find((n) => n.id === connection.source)
     const targetNode = nodes.find((n) => n.id === connection.target)
   
@@ -409,7 +279,7 @@ const handleConnect = (targetId: string) => {
   
     // Для If/Else ноды используем разные порты
     if (sourceNode.type === 'if_else') {
-      const connectionLabel = (connection as ConnectionWithLabel).data?.label || '';
+      const connectionLabel = connection.data?.label || '';
       if (connectionLabel.startsWith('true')) {
         // Зеленый порт (верхний)
         startY = sourceNode.position.y + 30;
@@ -433,7 +303,7 @@ const handleConnect = (targetId: string) => {
     let dashArray = ""
     
     // Для goto соединений используем пунктирную линию
-    const isGoto = (connection as ConnectionWithLabel).data?.label?.includes('goto');
+    const isGoto = connection.data?.label?.includes('goto');
     if (isGoto) {
       dashArray = "5,5"
     }
@@ -453,7 +323,7 @@ const handleConnect = (targetId: string) => {
     }
   
     // Для If/Else соединений добавляем метку
-    const connectionLabel = (connection as ConnectionWithLabel).data?.label;
+    const connectionLabel = connection.data?.label;
     const showLabel = connectionLabel && sourceNode.type === 'if_else';
     
     return (
@@ -510,38 +380,6 @@ const handleConnect = (targetId: string) => {
   const handleDeleteConnection = (connectionId: string) => {
     setConnections(prev => prev.filter(c => c.id !== connectionId));
   };
-  const onConnect = useCallback((params: Connection) => {
-    const sourceNode = nodes.find(n => n.id === params.source);
-    
-    if (sourceNode?.type === 'if_else' && draggedConnection?.portType) {
-      // Для If/Else используем тип порта из draggedConnection
-      const isGoto = confirm(
-        `Создать GOTO переход?\n\n` +
-        `ОК - создать ${draggedConnection.portType}:goto (для циклов)\n` +
-        `Отмена - создать обычный ${draggedConnection.portType} переход`
-      );
-      
-      const label = isGoto ? `${draggedConnection.portType}:goto` : draggedConnection.portType;
-      
-      const newConnection: ConnectionWithLabel = {
-        ...params,
-        id: `${params.source}-${params.target}-${Date.now()}`,
-        data: { label }
-      };
-      
-      setConnections((conns) => [...conns, newConnection]);
-    } else {
-      // Обычное соединение для других типов нод
-      const newConnection = {
-        ...params,
-        id: `${params.source}-${params.target}-${Date.now()}`
-      };
-      
-      setConnections((conns) => [...conns, newConnection]);
-    }
-    
-    setDraggedConnection(null);
-  }, [nodes, draggedConnection]);
   
   
 
@@ -1043,18 +881,8 @@ useEffect(() => {
   const saveWorkflow = async () => {
     if (apiStatus === "offline" || nodes.length === 0) return;
       // Убедись, что все соединения имеют правильные метки для If/Else
-    const connectionsWithLabels = connections.map(conn => {
-    const sourceNode = nodes.find(n => n.id === conn.source);
-    if (sourceNode?.type === 'if_else' && !conn.data?.label) {
-      // Если это соединение от If/Else ноды без метки, добавляем метку по умолчанию
-      console.warn(`⚠️ Соединение от If/Else ноды ${conn.source} не имеет метки. Добавляем метку 'true' по умолчанию.`);
-      return {
-        ...conn,
-        data: { label: 'true' }
-      };
-    }
-    return conn;
-  });
+    const connectionsWithLabels = getSanitizedConnections(); // <-- Используем хелпер
+    
 
   
     try {
@@ -1125,18 +953,8 @@ useEffect(() => {
   const executeWorkflow = async (startNodeId?: string) => {
     if (nodes.length === 0) return
     // Убедись, что все соединения имеют правильные метки для If/Else
-    const connectionsWithLabels = connections.map(conn => {
-    const sourceNode = nodes.find(n => n.id === conn.source);
-    if (sourceNode?.type === 'if_else' && !conn.data?.label) {
-      // Если это соединение от If/Else ноды без метки, добавляем метку по умолчанию
-      console.warn(`⚠️ Соединение от If/Else ноды ${conn.source} не имеет метки. Добавляем метку 'true' по умолчанию.`);
-      return {
-        ...conn,
-        data: { label: 'true' }
-      };
-    }
-    return conn;
-  });
+    const connectionsWithLabels = getSanitizedConnections(); // <-- Используем хелпер
+    
     if (apiStatus === "offline") {
       alert("API сервер недоступен. Запустите FastAPI сервер на порту 8000.")
       return
@@ -2081,7 +1899,7 @@ useEffect(() => {
                                           </div>
 
                                           {/* Информация о соединениях */}
-                                          <div className="border-t pt-4">
+                                          {/* <div className="border-t pt-4">
                                             <h4 className="font-medium mb-2">Как использовать:</h4>
                                             <div className="text-sm text-gray-600 space-y-1">
                                               <p>1. Потяните от <span className="text-green-600 font-bold">зеленого порта (T)</span> для TRUE ветки</p>
@@ -2092,7 +1910,7 @@ useEffect(() => {
                                                 <li><strong>GOTO переход</strong> - для создания циклов</li>
                                               </ul>
                                             </div>
-                                          </div>
+                                          </div> */}
                                           
 
                                           <div className="flex items-center space-x-2">
