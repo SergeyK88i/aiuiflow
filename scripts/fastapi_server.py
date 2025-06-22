@@ -628,18 +628,12 @@ class NodeExecutors:
 
     async def execute_gigachat(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение GigaChat ноды"""
-        logger.info(f"Executing GigaChat node: {node}")
-        logger.info(f"Node data: {node.data}")
-        logger.info(f"Config: {node.data.get('config', {})}")
-
+        logger.info(f"Executing GigaChat node: {node.id}")
         config = node.data.get('config', {})
-        role = config.get('role', 'custom')  # Добавляем получение роли
         auth_token = config.get('authToken')
         system_message = config.get('systemMessage', 'Ты полезный ассистент')
         user_message = config.get('userMessage', '')
         clear_history = config.get('clearHistory', False)
-
-        
 
         # ДОБАВЛЯЕМ ЛОГИРОВАНИЕ ВХОДНЫХ ДАННЫХ
         logger.info(f"📥 Входные данные от предыдущей ноды: {json.dumps(input_data, ensure_ascii=False, indent=2)[:500]}...")
@@ -647,7 +641,6 @@ class NodeExecutors:
         if input_data:
             original_message = user_message
             user_message = replace_templates(user_message, input_data)
-            
             # Также заменяем шаблоны в system_message если есть
             system_message = replace_templates(system_message, input_data)
             
@@ -655,16 +648,11 @@ class NodeExecutors:
                 logger.info(f"📝 Сообщение до замены: {original_message}")
                 logger.info(f"📝 Сообщение после замены: {user_message}")
 
-        logger.info(f"Auth token: {auth_token is not None}")
-        logger.info(f"Role: {role}")  # Логируем роль
-        logger.info(f"User message: {user_message}")
-
         if not auth_token or not user_message:
             raise Exception("GigaChat: Auth token and user message are required")
 
         logger.info(f"🤖 Выполнение GigaChat ноды: {node.id}")
         logger.info(f"📝 Вопрос: {user_message}")
-
         # Очищаем историю если нужно
         if clear_history:
             self.gigachat_api.clear_history()
@@ -679,17 +667,33 @@ class NodeExecutors:
         if not result.get('success'):
             raise Exception(result.get('error', 'Unknown error'))
 
+        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+        # Пытаемся распарсить ответ как JSON, но не ломаемся, если это не он.
+        raw_response_text = result.get('response', '')
+        parsed_json = None
+        try:
+            # Попытка парсинга
+            parsed_json = json.loads(raw_response_text)
+            logger.info("✅ Ответ от GigaChat успешно распознан как JSON.")
+        except json.JSONDecodeError:
+            # Если это не JSON, ничего страшного. Просто логируем это.
+            logger.info("ℹ️ Ответ от GigaChat не является валидным JSON. Будет обработан как обычный текст.")
+            pass # parsed_json останется None
+
         # Формируем выходные данные для следующих нод
+        # Теперь output содержит и text, и json
         return {
-            **result,
+            **result, # Включаем все исходные поля из result (success, response и т.д.)
             "output": {
-                "text": result.get('response', ''),
+                "text": raw_response_text, # Всегда содержит сырой текстовый ответ
+                "json": parsed_json,      # Содержит распарсенный объект или null
                 "question": user_message,
-                "length": len(result.get('response', '')),
-                "words": len(result.get('response', '').split()),
+                "length": len(raw_response_text),
+                "words": len(raw_response_text.split()),
                 "timestamp": datetime.now().isoformat()
             }
         }
+
 
     async def execute_email(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение Email ноды"""
@@ -1150,16 +1154,18 @@ class NodeExecutors:
         logger.info(f"📍 Фактическое значение: {actual_value}")
         logger.info(f"📍 Ожидаемое значение: {compare_value}")
         
+        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+        # Мы не создаем новый output, а возвращаем исходные данные,
+        # добавляя к ним результат проверки для маршрутизации.
+        # Это гарантирует, что данные от предыдущих нод не будут потеряны.
         return {
+            **input_data,  # <--- Пропускаем все входные данные дальше
             'success': True,
-            'branch': branch,
-            'condition_met': result,
-            'checked_value': str(actual_value),
-            'condition': f"{field_path} {condition_type} {compare_value}",
-            'output': {
-                'text': f"Condition {condition_type} {'met' if result else 'not met'}: {actual_value}",
-                'branch': branch,
-                'result': result
+            'branch': branch, # <--- Это поле используется для выбора следующей ноды
+            'if_else_result': { # <--- Добавляем отдельный блок с результатами If/Else для ясности
+                'condition_met': result,
+                'checked_value': str(actual_value),
+                'condition': f"{field_path} {condition_type} {compare_value}",
             }
         }
 
