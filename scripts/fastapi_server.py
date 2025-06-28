@@ -1,5 +1,5 @@
 import aiohttp
-from fastapi import FastAPI, HTTPException,Request, Body, Header
+from fastapi import FastAPI, HTTPException,Request, Body, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional, Tuple
@@ -11,10 +11,28 @@ import logging
 from datetime import datetime, timedelta
 import re
 import hashlib
+import os
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# НОВОЕ: Путь к файлу для хранения workflows и функции для работы с ним
+WORKFLOWS_FILE = "saved_workflows.json"
+
+def _save_workflows_to_disk():
+    """Сохраняет текущие workflows в JSON файл."""
+    with open(WORKFLOWS_FILE, "w", encoding="utf-8") as f:
+        json.dump(saved_workflows, f, ensure_ascii=False, indent=4)
+    logger.info(f"💾 Workflows сохранены в {WORKFLOWS_FILE}")
+
+def _load_workflows_from_disk():
+    """Загружает workflows из JSON файла при старте."""
+    if os.path.exists(WORKFLOWS_FILE):
+        with open(WORKFLOWS_FILE, "r", encoding="utf-8") as f:
+            global saved_workflows
+            saved_workflows = json.load(f)
+            logger.info(f"✅ Workflows загружены из {WORKFLOWS_FILE}")
 
 app = FastAPI(title="N8N Clone API", version="1.0.0")
 
@@ -70,6 +88,10 @@ class NodeConfig(BaseModel):
     compareValue: Optional[str] = ""
     caseSensitive: Optional[bool] = False
     maxGotoIterations: Optional[int] = 3  # Защита от бесконечных циклов
+    # НОВОЕ: Для Dispatcher ноды
+    routes: Optional[Dict[str, Any]] = None
+    useAI: Optional[bool] = True
+    dispatcherAuthToken: Optional[str] = None # Токен для GigaChat внутри диспетчера
 
 class Node(BaseModel):
     id: str
@@ -97,6 +119,11 @@ class ExecutionResult(BaseModel):
 # Добавьте эту модель данных после существующих моделей (примерно строка 50-60)
 class WorkflowSaveRequest(BaseModel):
     name: str
+    nodes: List[Node]
+    connections: List[Connection]
+
+# НОВОЕ: Модель для обновления workflow
+class WorkflowUpdateRequest(BaseModel):
     nodes: List[Node]
     connections: List[Connection]
 
@@ -920,7 +947,7 @@ class NodeExecutors:
             # Получаем ID текущего workflow из имени
             workflow_id = None
             for wf_id, wf_data in saved_workflows.items():
-                if any(n.id == node.id for n in wf_data["nodes"]):
+                if any(n['id'] == node.id for n in wf_data["nodes"]):
                     workflow_id = wf_id
                     break
             
@@ -1169,6 +1196,108 @@ class NodeExecutors:
             }
         }
 
+    # НОВОЕ: Логика для ноды-диспетчера
+    async def execute_dispatcher(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Агент-диспетчер, который анализирует запрос и выбирает нужный workflow"""
+        logger.info(f"Executing Dispatcher node: {node.id}")
+        config = node.data.get('config', {})
+        
+        # Получаем вопрос пользователя из разных возможных источников
+        user_query = ""
+        if input_data and 'output' in input_data and 'text' in input_data['output']:
+            user_query = input_data['output']['text']
+        elif input_data and 'user_query' in input_data:
+            user_query = input_data['user_query']
+        elif isinstance(input_data, dict): # Пытаемся найти ключ с запросом
+            user_query = input_data.get('query', input_data.get('text', ''))
+
+        if not user_query:
+            raise Exception("Dispatcher: User query not found in input data.")
+
+        # Конфигурация маршрутов
+        workflow_routes = config.get('routes', {})
+        if not workflow_routes:
+            raise Exception("Dispatcher: Routes are not configured.")
+
+        category = 'default'
+        
+        # Используем GigaChat для умного анализа
+        if config.get('useAI', True):
+            auth_token = config.get('dispatcherAuthToken')
+            if not auth_token:
+                raise Exception("Dispatcher: GigaChat auth token is required for AI mode.")
+
+            classification_prompt = f"""Определи категорию запроса пользователя и выбери подходящий обработчик.
+Доступные категории: {json.dumps(list(workflow_routes.keys()), ensure_ascii=False)}
+Запрос пользователя: {user_query}
+Ответь ТОЛЬКО одним словом - названием категории."""
+            
+            # Получаем токен и делаем запрос
+            if await self.gigachat_api.get_token(auth_token):
+                gigachat_result = await self.gigachat_api.get_chat_completion(
+                    "Ты - классификатор запросов. Отвечай только одним словом - названием категории.",
+                    classification_prompt
+                )
+                response_text = gigachat_result.get('response', 'default').strip().lower()
+                # Проверяем, что GigaChat вернул валидную категорию
+                if response_text in workflow_routes:
+                    category = response_text
+                else:
+                    logger.warning(f"GigaChat returned an unknown category '{response_text}', using default.")
+            else:
+                logger.error("Dispatcher: Failed to get GigaChat token.")
+
+        else:
+            # Простая классификация по ключевым словам
+            query_lower = user_query.lower()
+            for cat_name, cat_info in workflow_routes.items():
+                if cat_name != 'default' and 'keywords' in cat_info:
+                    if any(keyword.lower() in query_lower for keyword in cat_info['keywords']):
+                        category = cat_name
+                        break
+        
+        selected_route = workflow_routes.get(category, workflow_routes.get('default'))
+        if not selected_route:
+            raise Exception(f"Dispatcher: No route found for category '{category}' and no default route is set.")
+
+        workflow_id = selected_route['workflow_id']
+        logger.info(f"🎯 Диспетчер выбрал категорию: {category} -> Запуск workflow: {workflow_id}")
+
+        if workflow_id not in saved_workflows:
+            raise Exception(f"Dispatcher: Target workflow '{workflow_id}' not found.")
+
+        # Запускаем выбранный workflow
+        workflow_data = saved_workflows[workflow_id]
+        workflow_request = WorkflowExecuteRequest(
+            nodes=workflow_data["nodes"],
+            connections=workflow_data["connections"]
+        )
+        
+        # Передаем исходные данные в выбранный workflow
+        sub_workflow_result = await execute_workflow_internal(
+            workflow_request, 
+            initial_input_data={
+                **input_data,
+                "dispatcher_info": {
+                    "category": category,
+                    "original_query": user_query,
+                    "selected_workflow": workflow_id
+                }
+            }
+        )
+
+        # Возвращаем результат работы под-процесса
+        return {
+            **sub_workflow_result.result,
+            "success": sub_workflow_result.success,
+            "dispatcher_category": category,
+            "executed_workflow_id": workflow_id,
+            "output": {
+                "text": f"Результат от workflow '{workflow_id}': {sub_workflow_result.result}",
+                "json": sub_workflow_result.result
+            }
+        }
+    
 # Глобальный экземпляр исполнителей
 executors = NodeExecutors()
 
@@ -1211,7 +1340,9 @@ async def execute_node(
             'timer': executors.execute_timer,
             'join': executors.execute_join,
             'request_iterator': executors.execute_request_iterator,
-            'if_else': executors.execute_if_else  # Добавляем новый исполнитель
+            'if_else': executors.execute_if_else,  # Добавляем новый исполнитель
+            'dispatcher': executors.execute_dispatcher # НОВОЕ
+            
         }
 
         executor = executor_map.get(node_type)
@@ -1242,38 +1373,120 @@ async def execute_node(
                 "level": "error"
             }]
         )
+
+# --- НОВОЕ: CRUD Эндпоинты для Workflows ---
+
+@app.get("/workflows")
+async def list_workflows():
+    """Получить список всех сохраненных workflows."""
+    return {
+        "workflows": [
+            {"id": wf_id, "name": wf_data.get("name", wf_id)}
+            for wf_id, wf_data in saved_workflows.items()
+        ]
+    }
+
+@app.get("/workflows/{workflow_id}")
+async def get_workflow(workflow_id: str):
+    """Получить данные конкретного workflow по его ID."""
+    if workflow_id not in saved_workflows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    return saved_workflows[workflow_id]
+
+@app.post("/workflows", status_code=status.HTTP_201_CREATED)
+async def create_workflow(request: WorkflowSaveRequest):
+    """Создает новый workflow."""
+    # Генерируем ID из имени, делая его безопасным для URL
+    workflow_id = re.sub(r'[^a-z0-9_]+', '', request.name.lower().replace(" ", "_"))
+    if not workflow_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workflow name, results in empty ID.")
+    if workflow_id in saved_workflows:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Workflow with ID '{workflow_id}' already exists.")
+    
+    # Сохраняем workflow в памяти
+    saved_workflows[workflow_id] = {
+        "name": request.name,
+        "nodes": [node.dict() for node in request.nodes],
+        "connections": [conn.dict() for conn in request.connections],
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat()
+    }
+    _save_workflows_to_disk() # Сохраняем на диск
+    logger.info(f"✅ Workflow '{request.name}' (ID: {workflow_id}) создан.")
+    return {"success": True, "workflow_id": workflow_id, "name": request.name}
+
+@app.put("/workflows/{workflow_id}")
+async def update_workflow(workflow_id: str, request: WorkflowUpdateRequest):
+    """Обновляет существующий workflow."""
+    if workflow_id not in saved_workflows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    
+    # Обновляем данные
+    saved_workflows[workflow_id]["nodes"] = [node.dict() for node in request.nodes]
+    saved_workflows[workflow_id]["connections"] = [conn.dict() for conn in request.connections]
+    saved_workflows[workflow_id]["updated_at"] = datetime.now().isoformat()
+    _save_workflows_to_disk() # Сохраняем на диск
+    logger.info(f"🔄 Workflow '{workflow_id}' обновлен.")
+    return {"success": True, "message": f"Workflow '{workflow_id}' updated successfully."}
+
+@app.delete("/workflows/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workflow(workflow_id: str):
+    """Удаляет workflow."""
+    if workflow_id not in saved_workflows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    
+    del saved_workflows[workflow_id]
+    _save_workflows_to_disk() # Сохраняем на диск
+    logger.info(f"🗑️ Workflow '{workflow_id}' удален.")
 # Добавьте этот эндпоинт после других эндпоинтов (примерно строка 600-650)
-@app.post("/save-workflow")
-async def save_workflow(request: WorkflowSaveRequest):
-    """Сохраняет workflow на сервере"""
-    try:
-        workflow_id = request.name.lower().replace(" ", "_")
+# @app.post("/save-workflow")
+# async def save_workflow(request: WorkflowSaveRequest):
+#     """Сохраняет workflow на сервере"""
+#     try:
+#         workflow_id = request.name.lower().replace(" ", "_")
         
-        # Сохраняем workflow в памяти
-        saved_workflows[workflow_id] = {
-            "name": request.name,
-            "nodes": request.nodes,
-            "connections": request.connections,
-            "updated_at": datetime.now().isoformat()
-        }
+#         # Сохраняем workflow в памяти
+#         saved_workflows[workflow_id] = {
+#             "name": request.name,
+#             "nodes": request.nodes,
+#             "connections": request.connections,
+#             "updated_at": datetime.now().isoformat()
+#         }
         
-        # Можно также сохранить на диск для персистентности
-        # with open(f"workflows/{workflow_id}.json", "w") as f:
-        #     json.dump(saved_workflows[workflow_id], f)
+#         # Можно также сохранить на диск для персистентности
+#         # with open(f"workflows/{workflow_id}.json", "w") as f:
+#         #     json.dump(saved_workflows[workflow_id], f)
         
-        logger.info(f"✅ Workflow '{request.name}' сохранен успешно")
+#         logger.info(f"✅ Workflow '{request.name}' сохранен успешно")
         
-        return {
-            "success": True,
-            "workflow_id": workflow_id,
-            "message": f"Workflow '{request.name}' saved successfully"
-        }
-    except Exception as e:
-        logger.error(f"❌ Ошибка сохранения workflow: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+#         return {
+#             "success": True,
+#             "workflow_id": workflow_id,
+#             "message": f"Workflow '{request.name}' saved successfully"
+#         }
+#     except Exception as e:
+#         logger.error(f"❌ Ошибка сохранения workflow: {str(e)}")
+#         return {
+#             "success": False,
+#             "error": str(e)
+#         }
+
+@app.post("/execute-workflow/{workflow_id}")
+async def execute_saved_workflow(workflow_id: str, initial_input_data: Optional[Dict[str, Any]] = Body(None)):
+    """Запускает сохраненный workflow по его ID."""
+    if workflow_id not in saved_workflows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+
+    workflow_data = saved_workflows[workflow_id]
+    
+    workflow_request = WorkflowExecuteRequest(
+        nodes=workflow_data["nodes"],
+        connections=workflow_data["connections"]
+    )
+
+    return await execute_workflow_internal(workflow_request, initial_input_data=initial_input_data)
+
+
 # Добавьте новые эндпоинты после существующих
 
 @app.post("/webhooks/create")
@@ -1379,7 +1592,7 @@ async def trigger_webhook(
         # Находим ноду webhook_trigger в workflow
         webhook_trigger_node = None
         for node in workflow_data["nodes"]:
-            if node.type == "webhook_trigger":
+            if node.get("type") == "webhook_trigger":
                 webhook_trigger_node = node
                 break
         
@@ -1391,7 +1604,7 @@ async def trigger_webhook(
         workflow_request = WorkflowExecuteRequest(
             nodes=workflow_data["nodes"],
             connections=workflow_data["connections"],
-            startNodeId=webhook_trigger_node.id if webhook_trigger_node else None
+            startNodeId=webhook_trigger_node.get("id") if webhook_trigger_node else None
         )
         
         # Выполняем workflow с переданными данными
@@ -1666,7 +1879,8 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                 'timer': executors.execute_timer,
                 'join': executors.execute_join,
                 'request_iterator': executors.execute_request_iterator,
-                'if_else': executors.execute_if_else 
+                'if_else': executors.execute_if_else,
+                'dispatcher': executors.execute_dispatcher # НОВОЕ
             }
 
             executor = executor_map.get(node.type)
@@ -1938,6 +2152,7 @@ async def execute_timer_now(timer_id: str):
 @app.on_event("startup")
 async def startup_event():
     """Выполняется при запуске сервера"""
+    _load_workflows_from_disk() # НОВОЕ: Загружаем workflows
     logger.info("🚀 Сервер запущен")
 
 # Обработчик остановки сервера

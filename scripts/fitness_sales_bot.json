@@ -1,0 +1,268 @@
+{
+    "name": "Fitness_Sales_Bot",
+    "nodes": [
+      {
+        "id": "webhook_1",
+        "type": "webhook_trigger",
+        "position": { "x": 100, "y": 200 },
+        "data": {
+          "label": "Входящее сообщение",
+          "config": {}
+        }
+      },
+      {
+        "id": "analyzer_1",
+        "type": "gigachat",
+        "position": { "x": 300, "y": 200 },
+        "data": {
+          "label": "Анализатор запроса",
+          "config": {
+            "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+            "systemMessage": "Ты - анализатор клиентских запросов. Определяй ТОЛЬКО тип запроса.",
+            "userMessage": "Проанализируй запрос клиента и определи его тип.\n\nТипы запросов:\n- interest: общий интерес, хочет узнать о курсах\n- question: конкретный вопрос (цена, длительность, содержание)\n- objection: сомнения, возражения (дорого, нет времени, не верит)\n- purchase: готовность купить, просит ссылку на оплату\n\nЗапрос клиента: {{input.output.text}}\n\nОтветь ТОЛЬКО одним словом из списка выше.",
+            "clearHistory": true
+          }
+        }
+      },
+      {
+        "id": "router_interest",
+        "type": "if_else",
+        "position": { "x": 500, "y": 100 },
+        "data": {
+          "label": "Проверка: interest?",
+          "config": {
+            "conditionType": "equals",
+            "fieldPath": "output.text",
+            "compareValue": "interest",
+            "caseSensitive": false
+          }
+        }
+      },
+      {
+        "id": "router_question",
+        "type": "if_else",
+        "position": { "x": 500, "y": 200 },
+        "data": {
+          "label": "Проверка: question?",
+          "config": {
+            "conditionType": "equals",
+            "fieldPath": "output.text",
+            "compareValue": "question",
+            "caseSensitive": false
+          }
+        }
+      },
+      {
+        "id": "router_objection",
+        "type": "if_else",
+        "position": { "x": 500, "y": 300 },
+        "data": {
+          "label": "Проверка: objection?",
+          "config": {
+            "conditionType": "equals",
+            "fieldPath": "output.text",
+            "compareValue": "objection",
+            "caseSensitive": false
+          }
+        }
+      },
+      {
+        "id": "router_purchase",
+        "type": "if_else",
+        "position": { "x": 500, "y": 400 },
+        "data": {
+          "label": "Проверка: purchase?",
+          "config": {
+            "conditionType": "equals",
+            "fieldPath": "output.text",
+            "compareValue": "purchase",
+            "caseSensitive": false
+          }
+        }
+      },
+      {
+        "id": "handler_interest",
+        "type": "gigachat",
+        "position": { "x": 700, "y": 100 },
+        "data": {
+          "label": "Обработка интереса",
+          "config": {
+            "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+            "systemMessage": "Ты - заботливый фитнес-консультант Алёна. Твоя задача - выявить истинную потребность клиента через эмпатию. НЕ продавай сразу! Сначала пойми, что беспокоит человека.",
+            "userMessage": "Клиент проявил интерес к нашим курсам.\nЕго сообщение: {{input.output.text}}\n\nТвои действия:\n1. Тепло поприветствуй\n2. Покажи, что понимаешь (эмпатия)\n3. Задай 1-2 открытых вопроса о целях/проблемах\n4. Создай доверительную атмосферу\n\nИспользуй эмодзи, пиши тепло и по-дружески.\nОтвет до 120 слов."
+          }
+        }
+      },
+      {
+        "id": "handler_question",
+        "type": "gigachat",
+        "position": { "x": 700, "y": 200 },
+        "data": {
+          "label": "Ответы на вопросы",
+          "config": {
+            "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+            "systemMessage": "Ты - эксперт по фитнес-курсам. Знаешь всё о программах: КАЙФУШКА (21 тренировка), ОРЕХ НА ГРЕХ (19 тренировок), FLASH FRESH (24 тренировки), ЦУМ (19 тренировок).",
+            "userMessage": "Клиент задал вопрос: {{input.output.text}}\n\nДай четкий ответ и мягко предложи подходящий курс."
+          }
+        }
+      },
+      {
+        "id": "handler_objection",
+        "type": "gigachat",
+        "position": { "x": 700, "y": 300 },
+        "data": {
+          "label": "Работа с возражениями",
+          "config": {
+            "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+            "systemMessage": "Ты - мастер обработки возражений. Используешь технику 'Да, но...' и эмоциональные истории.",
+            "userMessage": "Клиент сомневается: {{input.output.text}}\n\nОбработай возражение с эмпатией."
+          }
+        }
+      },
+      {
+        "id": "handler_purchase",
+        "type": "gigachat",
+        "position": { "x": 700, "y": 400 },
+        "data": {
+          "label": "Закрытие сделки",
+          "config": {
+            "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+            "systemMessage": "Ты - мастер закрытия сделок. Создаешь ощущение праздника от покупки.",
+            "userMessage": "Клиент готов купить: {{input.output.text}}\n\nПорадуйся, создай срочность, дай инструкции."
+          }
+        }
+      },
+      {
+        "id": "join_responses",
+        "type": "join",
+        "position": { "x": 900, "y": 250 },
+        "data": {
+          "label": "Сбор ответов",
+          "config": {
+            "waitForAll": false,
+            "mergeStrategy": "combine_text"
+          }
+        }
+      },
+      {
+        "id": "save_to_db",
+        "type": "database",
+        "position": { "x": 1100, "y": 250 },
+        "data": {
+          "label": "Сохранить в БД",
+          "config": {
+            "query": "INSERT INTO conversations (message, type, response) VALUES ('{{input.output.text}}', 'sales', '{{output.text}}')",
+            "connection": "postgres"
+          }
+        }
+      },
+      {
+        "id": "send_response",
+        "type": "webhook",
+        "position": { "x": 1300, "y": 250 },
+        "data": {
+          "label": "Отправить ответ",
+          "config": {
+            "url": "https://your-messenger-api.com/send",
+            "method": "POST",
+            "headers": "Content-Type: application/json"
+          }
+        }
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1",
+        "source": "webhook_1",
+        "target": "analyzer_1",
+        "data": {}
+      },
+      {
+        "id": "c2",
+        "source": "analyzer_1",
+        "target": "router_interest",
+        "data": {}
+      },
+      {
+        "id": "c3",
+        "source": "router_interest",
+        "target": "router_question",
+        "data": { "label": "false" }
+      },
+      {
+        "id": "c4",
+        "source": "router_question",
+        "target": "router_objection",
+        "data": { "label": "false" }
+      },
+      {
+        "id": "c5",
+        "source": "router_objection",
+        "target": "router_purchase",
+        "data": { "label": "false" }
+      },
+      {
+        "id": "c6",
+        "source": "router_interest",
+        "target": "handler_interest",
+        "data": { "label": "true" }
+      },
+      {
+        "id": "c7",
+        "source": "router_question",
+        "target": "handler_question",
+        "data": { "label": "true" }
+      },
+      {
+        "id": "c8",
+        "source": "router_objection",
+        "target": "handler_objection",
+        "data": { "label": "true" }
+      },
+      {
+        "id": "c9",
+        "source": "router_purchase",
+        "target": "handler_purchase",
+        "data": { "label": "true" }
+      },
+      {
+        "id": "c10",
+        "source": "handler_interest",
+        "target": "join_responses",
+        "data": {}
+      },
+      {
+        "id": "c11",
+        "source": "handler_question",
+        "target": "join_responses",
+        "data": {}
+      },
+      {
+        "id": "c12",
+        "source": "handler_objection",
+        "target": "join_responses",
+        "data": {}
+      },
+      {
+        "id": "c13",
+        "source": "handler_purchase",
+        "target": "join_responses",
+        "data": {}
+      },
+      {
+        "id": "c14",
+        "source": "join_responses",
+        "target": "save_to_db",
+        "data": {}
+      },
+      {
+        "id": "c15",
+        "source": "save_to_db",
+        "target": "send_response",
+        "data": {}
+      }
+    ],
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z"
+  }
+  

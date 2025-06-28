@@ -23,6 +23,7 @@ import {
   Info,
   GitBranch,
   Box,
+  FolderOpen, // иконка для открытия
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,6 +35,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { GitMerge } from "lucide-react" // Добавьте к существующим импортам
+// НОВОЕ: Импортируем наши API функции и типы
+import * as api from './api';
+import { WorkflowManagerModal } from "@/WorkflowManagerModal"
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
  * Проверяет, является ли potentialAncestorId предком для nodeId в графе.
@@ -112,6 +117,14 @@ const nodeTypes = [
   { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false },
   { type: "request_iterator", label: "Request Iterator", icon: ListChecks, color: "bg-teal-500", canStart: false },
   {type: "if_else",label: "If/Else",icon: GitBranch, color: "bg-purple-500",description: "Условное ветвление с поддержкой циклов"},
+  // НОВОЕ: Добавляем ноду Диспетчер
+  { 
+    type: "dispatcher", 
+    label: "Dispatcher", 
+    icon: GitBranch, // Или Box
+    color: "bg-indigo-500", 
+    canStart: false 
+  },
   ];
   
   
@@ -178,7 +191,126 @@ export default function WorkflowEditor() {
     url: string;
     created_at: string;
   }>>([]);
-  
+  // НОВОЕ: Состояния для управления workflows
+  const [workflows, setWorkflows] = useState<api.WorkflowListItem[]>([]);
+  const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null);
+  const [currentWorkflowName, setCurrentWorkflowName] = useState<string>("Новый Workflow");
+  const [isWorkflowModalOpen, setWorkflowModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  // const WorkflowEditor = () => {
+  //   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  //   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  // НОВОЕ: Загружаем список workflows при запуске
+  useEffect(() => {
+    const fetchWorkflows = async () => {
+      try {
+        const workflowList = await api.listWorkflows();
+        setWorkflows(workflowList);
+      } catch (error) {
+        console.error("Failed to load workflows list:", error);
+        // Здесь можно показать уведомление об ошибке
+      }
+    };
+    fetchWorkflows();
+  }, []);
+
+  // НОВОЕ: Функции для работы с workflows
+const loadWorkflowsList = async () => {
+  try {
+      const workflowList = await api.listWorkflows();
+      setWorkflows(workflowList);
+  } catch (error) {
+      console.error("Failed to reload workflows list:", error);
+  }
+};
+
+const handleLoadWorkflow = async (id: string) => {
+  try {
+      const workflowData = await api.getWorkflow(id);
+      setNodes(workflowData.nodes || []);
+      setConnections(workflowData.connections || []);
+      setCurrentWorkflowId(id);
+      setCurrentWorkflowName(workflowData.name);
+      setWorkflowModalOpen(false); // Закрываем модалку после загрузки
+      console.log(`Workflow "${workflowData.name}" loaded.`);
+  } catch (error) {
+      console.error(`Failed to load workflow ${id}:`, error);
+      // Тут можно показать уведомление об ошибке
+  }
+};
+
+const handleCreateWorkflow = async (name: string) => {
+  try {
+      // Создаем пустой workflow
+      const newWorkflowData = { nodes: [], connections: [] };
+      const result = await api.createWorkflow(name, newWorkflowData);
+      
+      // Обновляем список и загружаем новый пустой workflow на холст
+      await loadWorkflowsList();
+      setNodes([]);
+      setConnections([]);
+      setCurrentWorkflowId(result.workflow_id);
+      setCurrentWorkflowName(name);
+      setWorkflowModalOpen(false);
+      console.log(`Workflow "${name}" created with id ${result.workflow_id}.`);
+  } catch (error) {
+      console.error("Failed to create workflow:", error);
+  }
+};
+
+const handleDeleteWorkflow = async (id: string) => {
+  try {
+      await api.deleteWorkflow(id);
+      await loadWorkflowsList();
+      // Если удалили текущий открытый workflow, очищаем холст
+      if (currentWorkflowId === id) {
+          setNodes([]);
+          setConnections([]);
+          setCurrentWorkflowId(null);
+          setCurrentWorkflowName("Новый Workflow");
+      }
+      console.log(`Workflow ${id} deleted.`);
+  } catch (error) {
+      console.error(`Failed to delete workflow ${id}:`, error);
+  }
+};
+// НОВОЕ: Универсальная функция сохранения
+const handleSave = async () => {
+  setIsSaving(true);
+  try {
+      const workflowData = { nodes, connections };
+      if (currentWorkflowId) {
+          // Обновляем существующий
+          await api.updateWorkflow(currentWorkflowId, workflowData);
+          console.log(`Workflow "${currentWorkflowName}" updated.`);
+          // Опционально: показать уведомление об успехе
+      } else {
+          // Создаем новый
+          const name = prompt("Введите имя для нового workflow:", "Мой новый workflow");
+          if (name) {
+              const result = await api.createWorkflow(name, workflowData);
+              setCurrentWorkflowId(result.workflow_id);
+              setCurrentWorkflowName(name);
+              await loadWorkflowsList(); // Обновляем список, чтобы он появился в модалке
+              console.log(`Workflow "${name}" created with id ${result.workflow_id}.`);
+          }
+      }
+  } catch (error) {
+      console.error("Failed to save workflow:", error);
+      // Тут можно показать уведомление об ошибке
+  } finally {
+      setIsSaving(false);
+  }
+};
+// Функция для создания нового "безымянного" workflow на холсте
+const handleNewWorkflow = () => {
+  setNodes([]);
+  setConnections([]);
+  setCurrentWorkflowId(null);
+  setCurrentWorkflowName("Новый Workflow");
+  console.log("Cleared canvas for a new workflow.");
+};
+
   // 1. Замени текущую функцию handleConnect на эту:
 const handleConnect = (targetId: string) => {
   if (!connecting) return;
@@ -383,61 +515,84 @@ const getSanitizedConnections = () => {
   
   
 
-  // Добавьте функцию для создания вебхука
-const createWebhook = async () => {
-  if (!workflowName || nodes.length === 0) {
-    alert("Сначала создайте и сохраните workflow");
-    return;
-  }
+  // НОВАЯ ВЕРСИЯ
+  const createWebhook = async () => {
+    // Сначала сохраняем workflow, используя новую универсальную функцию
+    await handleSave();
 
-  try {
-    // Сначала сохраняем workflow
-    await saveWorkflow();
-
-    const response = await fetch(`${API_BASE_URL}/webhooks/create`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        workflow_id: workflowName.toLowerCase().replace(/ /g, "_"),
-        name: `${workflowName} Webhook`,
-        description: `Webhook для запуска workflow: ${workflowName}`,
-        auth_required: false,
-        allowed_ips: []
-      }),
-    });
-
-    if (response.ok) {
-      const webhook = await response.json();
-      
-      // Обновляем ноду webhook с полученным URL
-      const webhookNode = nodes.find(n => n.type === "webhook_trigger");
-      if (webhookNode) {
-        updateNodeConfig("webhookId", webhook.webhook_id);
-        updateNodeConfig("webhookUrl", webhook.url);
-      }
-
-      setExecutionLogs((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          nodeId: "system",
-          status: "success",
-          message: `Webhook создан: ${webhook.url}`,
-          timestamp: new Date(),
-        },
-      ]);
-
-      // Копируем URL в буфер обмена
-      navigator.clipboard.writeText(webhook.url);
-      alert(`Webhook создан!\n\nURL: ${webhook.url}\n\n(Скопирован в буфер обмена)`);
+    // Проверяем, что после сохранения у нас есть ID (особенно важно для новых workflow)
+    if (!currentWorkflowId) {
+      alert("Не удалось сохранить workflow. Пожалуйста, попробуйте еще раз.");
+      return;
     }
-  } catch (error) {
-    console.error("Error creating webhook:", error);
-    alert("Ошибка создания webhook");
-  }
-};
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/webhooks/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          // Используем правильный ID из состояния
+          workflow_id: currentWorkflowId,
+          name: `${currentWorkflowName} Webhook`,
+          description: `Webhook для запуска workflow: ${currentWorkflowName}`,
+          auth_required: false,
+          allowed_ips: []
+        }),
+      });
+
+      if (response.ok) {
+        const webhook = await response.json();
+        
+        // Обновляем ноду webhook с полученным URL
+        const webhookNode = nodes.find(n => n.type === "webhook_trigger");
+        if (webhookNode) {
+          // Здесь нужно обновить состояние ноды. Предполагается, что у вас есть функция для этого.
+          // Если updateNodeConfig обновляет только selectedNode, нужно обновить глобальное состояние.
+          const newNodes = nodes.map(n => {
+            if (n.type === "webhook_trigger") {
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  config: {
+                    ...n.data.config,
+                    webhookId: webhook.webhook_id,
+                    webhookUrl: webhook.url,
+                  }
+                }
+              };
+            }
+            return n;
+          });
+          setNodes(newNodes);
+        }
+
+        setExecutionLogs((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            nodeId: "system",
+            status: "success",
+            message: `Webhook создан: ${webhook.url}`,
+            timestamp: new Date(),
+          },
+        ]);
+
+        // Копируем URL в буфер обмена
+        navigator.clipboard.writeText(webhook.url);
+        alert(`Webhook создан!\n\nURL: ${webhook.url}\n\n(Скопирован в буфер обмена)`);
+      } else {
+          const error = await response.json();
+          throw new Error(error.detail || "Failed to create webhook");
+      }
+    } catch (error) {
+      console.error("Error creating webhook:", error);
+      alert(`Ошибка создания webhook: ${error.message}`);
+    }
+  };
+
 
   const [isExecuting, setIsExecuting] = useState(false)
   const [executionLogs, setExecutionLogs] = useState<
@@ -766,6 +921,11 @@ useEffect(() => {
         caseSensitive: false,
         enableGoto: false,
         maxGotoIterations: 10
+      },
+      dispatcher: {
+        useAI: false,
+        dispatcherAuthToken: '',
+        routes: {}
       }
     }
 
@@ -960,7 +1120,7 @@ useEffect(() => {
       return
     }
     // Сначала сохраняем workflow
-    await saveWorkflow();
+    await handleSave();
 
     const controller = new AbortController()
     setAbortController(controller)
@@ -1077,7 +1237,7 @@ useEffect(() => {
     try {
        // Если это нода таймера, сначала сохраняем workflow
       if (node.type === "timer") {
-        await saveWorkflow();
+        await handleSave();
       }
       const response = await fetch(`${API_BASE_URL}/execute-node?node_type=${node.type}`, {
         method: "POST",
@@ -1172,55 +1332,64 @@ useEffect(() => {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
+      {/* НОВОЕ: Добавляем компонент модального окна */}
+      <WorkflowManagerModal
+        isOpen={isWorkflowModalOpen}
+        onClose={() => setWorkflowModalOpen(false)}
+        workflows={workflows}
+        onLoad={handleLoadWorkflow}
+        onCreate={handleCreateWorkflow}
+        onDelete={handleDeleteWorkflow}
+      />
       {/* Header */}
-      <div className="bg-white border-b px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Input
-            value={workflowName}
-            onChange={(e) => setWorkflowName(e.target.value)}
-            className="text-lg font-semibold border-none shadow-none p-0 h-auto"
-          />
-          <Badge variant="secondary">{nodes.length} nodes</Badge>
-          <Badge variant={apiStatus === "online" ? "default" : "destructive"}>
-            API: {apiStatus === "checking" ? "..." : apiStatus}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={checkApiStatus}>
-            <ExternalLink className="w-4 h-4 mr-2" />
-            Check API
-          </Button>
-          <Button variant="outline" size="sm" onClick={saveWorkflow} disabled={nodes.length === 0 || apiStatus === "offline"}>
-            <Save className="w-4 h-4 mr-2" />
-            Save
-          </Button>
-        
-<Button 
-  variant="outline" 
-  size="sm" 
-  onClick={createWebhook}
-  disabled={nodes.length === 0 || !nodes.some(n => n.type === "webhook_trigger") || apiStatus === "offline"}
->
-  <Webhook className="w-4 h-4 mr-2" />
-  Create Webhook
-</Button>
-          {isExecuting ? (
-            <Button onClick={stopExecution} size="sm" variant="destructive">
-              <Square className="w-4 h-4 mr-2" />
-              Stop
-            </Button>
-          ) : (
-            <Button
-              onClick={() => executeWorkflow()}
-              size="sm"
-              disabled={nodes.length === 0 || apiStatus === "offline"}
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Execute
-            </Button>
-          )}
-        </div>
-      </div>
+      <header className="p-2 border-b flex items-center justify-between bg-card shrink-0">
+  <div className="flex items-center gap-4">
+    <Button variant="outline" onClick={() => setWorkflowModalOpen(true)} size="sm">
+      <FolderOpen className="h-4 w-4 mr-2" />
+      <span>{currentWorkflowName}</span>
+    </Button>
+    <Button variant="ghost" size="sm" onClick={handleNewWorkflow}>
+      Создать новый
+    </Button>
+    <Badge variant="secondary">{nodes.length} nodes</Badge>
+    <Badge variant={apiStatus === "online" ? "default" : "destructive"}>
+       API: {apiStatus}
+    </Badge>
+  </div>
+
+  <div className="flex items-center gap-2">
+    <Button variant="outline" size="sm" onClick={checkApiStatus}>
+      <ExternalLink className="h-4 w-4 mr-2" />
+      Check API
+    </Button>
+
+    <Button 
+      variant="outline" 
+      size="sm" 
+      onClick={createWebhook}
+      disabled={nodes.length === 0 || !nodes.some(n => n.type === "webhook_trigger") || apiStatus === "offline"}
+    >
+      <Webhook className="w-4 h-4 mr-2" />
+        Create Webhook
+    </Button>
+
+    <Button onClick={handleSave} disabled={nodes.length === 0 || apiStatus === "offline"} size="sm">
+      <Save className="h-4 w-4 mr-2" />
+      {isSaving ? "Сохранение..." : (currentWorkflowId ? "Сохранить" : "Сохранить как...")}
+    </Button>
+    {isExecuting ? (
+      <Button onClick={stopExecution} variant="destructive" size="sm">
+        <Square className="h-4 w-4 mr-2" />
+          Stop
+      </Button>
+      ) : (
+      <Button onClick={() =>executeWorkflow()} disabled={nodes.length === 0 || apiStatus === "offline"} size="sm">
+        <Play className="h-4 w-4 mr-2" />
+          Выполнить
+      </Button>
+    )}
+  </div>
+</header>
 
       {/* API Status Alert */}
       {apiStatus === "offline" && (
@@ -1957,7 +2126,136 @@ useEffect(() => {
                                           </div>
                                         </div>
                                       </>
-                  )}               
+                  )}
+                  {/********************************************/}
+                  {/*     НАЧАЛО БЛОКА ДЛЯ НОДЫ "ДИСПЕТЧЕР"     */}
+                  {/********************************************/}
+                  {selectedNode.type === "dispatcher" && (() => {
+                      // Получаем текущие маршруты из конфига ноды
+                      const routes = selectedNode.data.config?.routes || {};
+                      const routeEntries = Object.entries(routes);
+
+                      // Функция для обновления конкретного поля в маршруте
+                      const handleRouteConfigChange = (category, field, value) => {
+                        const newRoutes = { ...routes };
+                        if (!newRoutes[category]) newRoutes[category] = {};
+                        newRoutes[category][field] = value;
+                        updateNodeConfig('routes', newRoutes);
+                      };
+                      
+                      // Функция для переименования категории маршрута
+                      const handleCategoryChange = (oldCategory, newCategory) => {
+                        if (oldCategory === newCategory || !newCategory.trim() || routes[newCategory]) return;
+                        const newRoutes = { ...routes };
+                        newRoutes[newCategory] = newRoutes[oldCategory];
+                        delete newRoutes[oldCategory];
+                        updateNodeConfig('routes', newRoutes);
+                      };
+
+                      // Функция для добавления нового пустого маршрута
+                      const handleAddRoute = () => {
+                        const newCategory = `Новый маршрут ${Object.keys(routes).length + 1}`;
+                        const newRoutes = { ...routes, [newCategory]: { workflow_id: '', keywords: [] } };
+                        updateNodeConfig('routes', newRoutes);
+                      };
+
+                      // Функция для удаления маршрута
+                      const handleDeleteRoute = (category) => {
+                        const newRoutes = { ...routes };
+                        delete newRoutes[category];
+                        updateNodeConfig('routes', newRoutes);
+                      };
+
+                      return (
+                        <>
+                          <div className="p-4 border-b">
+                            <Label>Лейбл ноды</Label>
+                            <Input
+                              value={selectedNode.data.label || ''}
+                              onChange={(e) => updateNodeData('label', e.target.value)}
+                            />
+                          </div>
+                          <div className="p-4 space-y-4">
+                            <h3 className="text-lg font-semibold">Настройки Диспетчера</h3>
+                            <div className="flex items-center space-x-2">
+                                <Switch
+                                    id="use-ai-switch"
+                                    checked={selectedNode.data.config?.useAI || false}
+                                    onCheckedChange={(checked) => updateNodeConfig('useAI', checked)}
+                                />
+                                <Label htmlFor="use-ai-switch">Использовать AI для маршрутизации</Label>
+                            </div>
+                            {selectedNode.data.config?.useAI && (
+                                <div>
+                                    <Label>Токен GigaChat для диспетчера</Label>
+                                    <Input
+                                        type="password"
+                                        placeholder="Введите токен..."
+                                        value={selectedNode.data.config?.dispatcherAuthToken || ''}
+                                        onChange={(e) => updateNodeConfig('dispatcherAuthToken', e.target.value)}
+                                    />
+                                </div>
+                            )}
+
+                            <h4 className="text-md font-semibold border-t pt-4">Маршруты</h4>
+                            <ScrollArea className="h-[350px] w-full">
+                              <div className="space-y-3 pr-4">
+                                {routeEntries.map(([category, config]) => (
+                                  <div key={category} className="p-3 border rounded-lg bg-card">
+                                    <div className="flex justify-between items-center mb-3">
+                                      <Input 
+                                        defaultValue={category}
+                                        className="font-semibold text-md h-8 border-0 shadow-none focus-visible:ring-1"
+                                        onBlur={(e) => handleCategoryChange(category, e.target.value)}
+                                      />
+                                      <Button variant="ghost" size="icon" onClick={() => handleDeleteRoute(category)}>
+                                        <Trash2 className="h-4 w-4 text-destructive" />
+                                      </Button>
+                                    </div>
+                                    <div className="space-y-3">
+                                      <div>
+                                        <Label>Вызываемый Workflow</Label>
+                                        <Select
+                                          value={config.workflow_id || ''}
+                                          onValueChange={(value) => handleRouteConfigChange(category, 'workflow_id', value)}
+                                        >
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Выберите workflow..." />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {workflows.map(wf => (
+                                              <SelectItem key={wf.id} value={wf.id}>{wf.name}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      {!selectedNode.data.config?.useAI && (
+                                        <div>
+                                          <Label>Ключевые слова (через запятую)</Label>
+                                          <Input
+                                            placeholder="заказ, статус, купить..."
+                                            value={(config.keywords || []).join(', ')}
+                                            onChange={(e) => handleRouteConfigChange(category, 'keywords', e.target.value.split(',').map(k => k.trim()))}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </ScrollArea>
+                            <Button onClick={handleAddRoute} className="mt-2 w-full">
+                              Добавить маршрут
+                            </Button>
+                          </div>
+                        </>
+                      );
+                  })()}
+                  {/********************************************/}
+                  {/*      КОНЕЦ БЛОКА ДЛЯ НОДЫ "ДИСПЕТЧЕР"      */}
+                  {/********************************************/}
+
+                                 
                 </CardContent>
               </Card>
             </div>
@@ -1965,11 +2263,13 @@ useEffect(() => {
         </div>
 
         {/* Canvas */}
-        <div className="flex-1 relative overflow-hidden">
+        <div className="flex-1 relative overflow-auto">
           <div
             ref={canvasRef}
             className="w-full h-full relative bg-gray-50"
             style={{
+              width: "3000px",  // Фиксированная ширина холста
+              height: "2000px", // Фиксированная высота холста
               backgroundImage: "radial-gradient(circle, #e5e7eb 1px, transparent 1px)",
               backgroundSize: "20px 20px",
             }}
