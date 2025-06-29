@@ -23,7 +23,8 @@ import {
   Info,
   GitBranch,
   Box,
-  FolderOpen, // иконка для открытия
+  FolderOpen,
+  Copy // иконка для открытия
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -274,6 +275,40 @@ const handleDeleteWorkflow = async (id: string) => {
       console.error(`Failed to delete workflow ${id}:`, error);
   }
 };
+
+// НОВАЯ ФУНКЦИЯ ДЛЯ КЛОНИРОВАНИЯ
+const handleCloneWorkflow = async (sourceId: string, sourceName: string) => {
+  const newName = prompt(`Введите имя для копии workflow:`, `${sourceName} (копия)`);
+  if (!newName || !newName.trim()) {
+    console.log("Клонирование отменено.");
+    return;
+  }
+
+  try {
+    console.log(`Клонирование workflow "${sourceName}" (ID: ${sourceId})...`);
+    
+    // 1. Получаем данные исходного workflow
+    const workflowToClone = await api.getWorkflow(sourceId);
+    
+    // 2. Создаем новый workflow с этими данными и новым именем
+    await api.createWorkflow(newName, {
+      nodes: workflowToClone.nodes,
+      connections: workflowToClone.connections,
+    });
+
+    console.log(`Workflow успешно склонирован как "${newName}"`);
+    
+    // 3. Обновляем список, чтобы увидеть клон
+    await loadWorkflowsList();
+    
+    alert(`Workflow "${sourceName}" успешно склонирован как "${newName}"!`);
+
+  } catch (error) {
+    console.error(`Ошибка при клонировании workflow ${sourceId}:`, error);
+    alert("Не удалось склонировать workflow. Подробности в консоли.");
+  }
+};
+
 // НОВОЕ: Универсальная функция сохранения
 const handleSave = async () => {
   setIsSaving(true);
@@ -1340,6 +1375,7 @@ useEffect(() => {
         onLoad={handleLoadWorkflow}
         onCreate={handleCreateWorkflow}
         onDelete={handleDeleteWorkflow}
+        onClone={handleCloneWorkflow}
       />
       {/* Header */}
       <header className="p-2 border-b flex items-center justify-between bg-card shrink-0">

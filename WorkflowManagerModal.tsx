@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkflowListItem } from './api'; // Импортируем наш тип
-import { Trash2, FilePlus2 } from 'lucide-react';
+import { Trash2, FilePlus2, Copy, FolderOpen } from 'lucide-react';
 
 interface WorkflowManagerModalProps {
   isOpen: boolean;
@@ -13,6 +13,8 @@ interface WorkflowManagerModalProps {
   onLoad: (id: string) => void;
   onCreate: (name: string) => Promise<void>;
   onDelete: (id: string) => void;
+  onClone: (id: string, name: string) => void;
+
 }
 
 export const WorkflowManagerModal: React.FC<WorkflowManagerModalProps> = ({
@@ -22,6 +24,7 @@ export const WorkflowManagerModal: React.FC<WorkflowManagerModalProps> = ({
   onLoad,
   onCreate,
   onDelete,
+  onClone
 }) => {
   const [newWorkflowName, setNewWorkflowName] = useState('');
 
@@ -61,6 +64,9 @@ export const WorkflowManagerModal: React.FC<WorkflowManagerModalProps> = ({
                   <div className="flex items-center space-x-2">
                     <Button variant="outline" size="sm" onClick={() => onLoad(wf.id)}>
                       Загрузить
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => onClone(wf.id, wf.name)} title="Клонировать">
+                      <Copy className="h-4 w-4" />
                     </Button>
                     <Button
                       variant="destructive"

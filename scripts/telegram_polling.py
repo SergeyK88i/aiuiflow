@@ -4,8 +4,8 @@ import json
 
 TELEGRAM_TOKEN = "7768666638:AAH-bOhEwfunRXFrIcE3TVT0xipdycXx7dM"
 API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-# LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/sales_consultation"
-LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/fitness_sales_bot"
+LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/sales_consultation"
+# LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/fitness_sales_bot"
 
 
 async def get_updates(offset=0):
@@ -35,10 +35,7 @@ async def process_message(message):
     # Список ID нод, которые генерируют финальный ответ для пользователя.
     # Возьмите эти ID из вашего UI-редактора.
     HANDLER_NODE_IDS = [
-        "handler_interest",
-        "handler_question",
-        "handler_objection",
-        "handler_purchase"
+        "node-1750962774246",
     ]
     # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
 
