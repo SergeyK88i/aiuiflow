@@ -4,8 +4,11 @@ import json
 
 TELEGRAM_TOKEN = "7768666638:AAH-bOhEwfunRXFrIcE3TVT0xipdycXx7dM"
 API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/sales_consultation"
+# START_NODE_ID = "node-1750962779368"
+# LOCAL_WORKFLOW_URL = f"http://localhost:8000/execute-workflow/sales_consultation?startNodeId={START_NODE_ID}"
+# LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/sales_consultation"
 # LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/fitness_sales_bot"
+LOCAL_WORKFLOW_URL = "http://localhost:8000/webhooks/fffdaab0-bf8c-47f3-bce5-1415840e5c78"
 
 
 async def get_updates(offset=0):
@@ -52,8 +55,15 @@ async def process_message(message):
                     result = await response.json()
                     print(f"📦 Получен результат: {json.dumps(result, ensure_ascii=False, indent=2)[:500]}")
 
-                    if result and "result" in result and result["result"]:
-                        all_node_results = result["result"]
+                    if result:
+                        all_node_results = None
+                        # Проверяем, есть ли вложенный ключ 'result' (для совместимости)
+                        if "result" in result and result["result"]:
+                            all_node_results = result["result"]
+                        else:
+                            # Если нет, значит результат и есть словарь с нодами
+                            all_node_results = result
+
                         final_answer = None
 
                         # 1. Сначала ищем ответ в приоритетных нодах-обработчиках
@@ -61,7 +71,8 @@ async def process_message(message):
                             if node_id in all_node_results:
                                 node_result = all_node_results[node_id]
                                 # Ищем текст ответа в output.text или в response
-                                answer_text = node_result.get("output", {}).get("text") or node_result.get("response")
+                                # answer_text = node_result.get("output", {}).get("text") or node_result.get("response")
+                                answer_text = node_result.get("text")
                                 if answer_text and isinstance(answer_text, str):
                                     # Проверяем, что это не JSON
                                     if not answer_text.strip().startswith('{'):

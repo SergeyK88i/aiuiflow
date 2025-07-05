@@ -347,73 +347,92 @@ const handleNewWorkflow = () => {
 };
 
   // 1. Замени текущую функцию handleConnect на эту:
-const handleConnect = (targetId: string) => {
-  if (!connecting) return;
-
-  // Проверяем, это If/Else соединение или обычное
-  if (connecting.includes(':')) {
-    // If/Else соединение
-    const [sourceId, portType] = connecting.split(':');
+  const handleConnect = (targetId: string) => {
+    if (!connecting) return;
+  
+    // --- Шаг 1: Определяем ключевые переменные ---
+    const isIfElseNode = connecting.includes(':');
+    const sourceId = isIfElseNode ? connecting.split(':')[0] : connecting;
     const sourceNode = nodes.find(n => n.id === sourceId);
-    
-    // Проверяем, включен ли GOTO режим для этой ноды
-    const isGotoEnabled = sourceNode?.data.config.enableGoto || false;
-    
-    let useGoto = false;
-    let finalLabel = portType;
-
-    // Проверяем, не создается ли цикл обычным соединением
+  
+    if (!sourceNode) {
+      setConnecting(null);
+      return;
+    }
+  
+    // --- Шаг 2: Главная проверка на создание цикла ---
+    // Эта проверка выполняется для ЛЮБОЙ попытки соединения.
     if (isCreatingCycle(targetId, sourceId, connections)) {
-      const confirmGoto = confirm(
-        "⚠️ Обнаружен циклический переход!\n\n" +
-        "Вы пытаетесь соединить узел с одним из его предшественников. Чтобы избежать бесконечных циклов, это соединение должно быть GOTO-переходом.\n\n" +
-        "Нажмите 'ОК', чтобы автоматически преобразовать это соединение в безопасный GOTO-переход (рекомендуется).\n" +
-        "Нажмите 'Отмена', чтобы отменить создание этого соединения."
-      );
-
-      if (confirmGoto) {
-        useGoto = true;
-      } else {
-        setConnecting(null); // Отменяем соединение
-        return;
+      
+      // --- Шаг 2.1: Если цикл исходит от If/Else, предлагаем GOTO ---
+      if (isIfElseNode) {
+        const confirmGoto = confirm(
+          "⚠️ Обнаружен циклический переход!\n\n" +
+          "Вы пытаетесь соединить узел с одним из его предшественников. Чтобы избежать бесконечных циклов, это соединение должно быть GOTO-переходом.\n\n" +
+          "Нажмите 'ОК', чтобы автоматически преобразовать это соединение в безопасный GOTO-переход."
+        );
+  
+        if (confirmGoto) {
+          const portType = connecting.split(':')[1];
+          const newConnection: ConnectionWithLabel = {
+            id: `${sourceId}-${targetId}-${Date.now()}`,
+            source: sourceId,
+            target: targetId,
+            data: { label: `${portType}:goto` }
+          };
+          setConnections(prev => [...prev, newConnection]);
+        }
+        // Если пользователь нажал "Отмена", ничего не делаем.
+      } 
+      // --- Шаг 2.2: Если цикл исходит от любой другой ноды, ЗАПРЕЩАЕМ ---
+      else {
+        alert(
+          "❌ Действие отменено.\n\n" +
+          "Создание циклического соединения запрещено для этого типа узлов. Циклы (GOTO-переходы) разрешены только для узлов 'If/Else'."
+        );
+        // Никакое соединение не создается.
       }
-    } else if (isGotoEnabled) {
-      // Если GOTO включен и цикл не обнаружен, спрашиваем пользователя как обычно
-      const confirmRegularGoto = confirm(
-        `Создать GOTO переход?\n\n` +
-        `ОК - создать ${portType}:goto (для циклов)\n` +
-        `Отмена - создать обычный ${portType} переход`
-      );
-      if (confirmRegularGoto) {
-        useGoto = true;
-      }
+  
+      // В любом случае, после обработки цикла, завершаем операцию.
+      setConnecting(null);
+      return;
     }
-
-    if (useGoto) {
-      finalLabel = `${portType}:goto`;
-    }
+  
+    // --- Шаг 3: Обработка НЕ-циклических соединений ---
     
+    // Проверяем, не включен ли GOTO вручную для If/Else (для особых случаев)
+    if (isIfElseNode && sourceNode.data.config.enableGoto) {
+      const confirmManualGoto = confirm(
+        `Создать принудительный GOTO переход?\n\n` +
+        `Опция GOTO для этой ноды включена. Нажмите 'ОК', чтобы создать GOTO-переход, или 'Отмена' для создания обычного соединения.`
+      );
+      if (confirmManualGoto) {
+          const portType = connecting.split(':')[1];
+          const newConnection: ConnectionWithLabel = {
+            id: `${sourceId}-${targetId}-${Date.now()}`,
+            source: sourceId,
+            target: targetId,
+            data: { label: `${portType}:goto` }
+          };
+          setConnections(prev => [...prev, newConnection]);
+          setConnecting(null);
+          return;
+      }
+    }
+  
+    // Если это не цикл и не ручной GOTO, создаем обычное соединение.
+    const label = isIfElseNode ? connecting.split(':')[1] : undefined;
     const newConnection: ConnectionWithLabel = {
       id: `${sourceId}-${targetId}-${Date.now()}`,
       source: sourceId,
       target: targetId,
-      data: { label: finalLabel }
+      data: label ? { label } : undefined
     };
-    
-    setConnections([...connections, newConnection]);
-  } else {
-    // Обычное соединение
-    const newConnection = {
-      id: `${connecting}-${targetId}-${Date.now()}`,
-      source: connecting,
-      target: targetId,
-    };
-    
-    setConnections([...connections, newConnection]);
-  }
+    setConnections(prev => [...prev, newConnection]);
   
-  setConnecting(null);
-};
+    setConnecting(null);
+  };
+  
   
   
 const getSanitizedConnections = () => {
@@ -646,6 +665,7 @@ const getSanitizedConnections = () => {
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">("checking")
   const [debugInfo, setDebugInfo] = useState<string>("")
   const [selectedResult, setSelectedResult] = useState<{nodeId: string, data: any} | null>(null);
+  const [isWorkflowResultModalOpen, setWorkflowResultModalOpen] = useState(false);
 
   // Состояние для таймеров
   const [timers, setTimers] = useState<TimerData[]>([])
@@ -1672,12 +1692,12 @@ useEffect(() => {
                         <Label htmlFor="url">Target URL</Label>
                         <Input
                           id="url"
-                          placeholder="https://api.example.com/endpoint/{{input.output.id}}"
+                          placeholder="https://api.example.com/items/{{node-1.json.itemId}}"
                           value={selectedNode.data.config.url || ""}
                           onChange={(e) => updateNodeConfig("url", e.target.value)}
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          URL для отправки запроса. Поддерживает шаблоны: {"{{input.output.field}}"}
+                          URL для отправки запроса. Поддерживает шаблоны: {"{{node-id.json.field}}"}
                         </p>
                       </div>
 
@@ -1704,7 +1724,7 @@ useEffect(() => {
                         <Label htmlFor="headers">Headers</Label>
                         <Textarea
                           id="headers"
-                          placeholder="Content-Type: application/json&#10;Authorization: Bearer {{input.output.token}}"
+                          placeholder="Content-Type: application/json&#10;Authorization: Bearer {{node-auth.json.token}}"
                           value={selectedNode.data.config.headers || "Content-Type: application/json"}
                           onChange={(e) => updateNodeConfig("headers", e.target.value)}
                           rows={3}
@@ -1713,16 +1733,35 @@ useEffect(() => {
                           Заголовки запроса (каждый с новой строки). Поддерживает шаблоны.
                         </p>
                       </div>
+                      
+                      {/* Ваш новый, абсолютно правильный блок */}
+                      <div className="mt-2">
+                        <Label htmlFor="bodyTemplate">Request Body (JSON с шаблонами)</Label>
+                        <Textarea
+                          id="bodyTemplate"
+                          placeholder={`{
+  "name": "Новый клиент",
+  "source_id": "{{node-1.json.id}}",
+  "comment": "{{node-2.text}}"
+}`}
+                          value={selectedNode.data.config.bodyTemplate || ""}
+                          onChange={(e) => updateNodeConfig("bodyTemplate", e.target.value)}
+                          rows={5}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Тело запроса для методов POST/PUT/PATCH. Используйте шаблоны для динамических данных.
+                        </p>
+                      </div>
 
                       <Alert className="mt-4">
                         <AlertCircle className="h-4 w-4" />
                         <AlertDescription className="text-xs">
-                          Эта нода отправляет HTTP запрос на указанный URL с данными от предыдущей ноды.
-                          Используйте шаблоны {"{{input.output.field}}"} для динамических значений.
+                          Эта нода отправляет HTTP запрос на указанный URL с данными, сформированными из шаблона тела запроса.
                         </AlertDescription>
                       </Alert>
                     </>
                   )}
+
                   {selectedNode.type === "email" && (
                     <>
                       <div>
@@ -1938,17 +1977,43 @@ useEffect(() => {
                   )}
                   {selectedNode.type === "request_iterator" && (
   <>
+    {/* Informational Alert - Принцип работы */}
+    <Alert>
+      <AlertCircle className="h-4 w-4" />
+      <AlertDescription className="text-xs">
+        <p className="font-medium mb-1">Принцип работы ноды:</p>
+        Эта нода ожидает на вход JSON-массив с описанием HTTP-запросов, выполняет их и возвращает массив с результатами.
+      </AlertDescription>
+    </Alert>
+
+    {/* НОВОЕ ПОЛЕ: JSON Input */}
+    <div className="mt-4">
+      <Label htmlFor="jsonInput">JSON Input (с поддержкой шаблонов)</Label>
+      <Textarea
+        id="jsonInput"
+        placeholder="{{ node-123.text }}"
+        value={selectedNode.data.config.jsonInput || ""}
+        onChange={(e) => updateNodeConfig("jsonInput", e.target.value)}
+        rows={3}
+      />
+      <p className="text-xs text-gray-500 mt-1">
+        Укажите, откуда брать JSON-массив для запросов.
+        <br />
+        Пример: <strong>{"{{ node-1751277373449.text }}"}</strong>
+      </p>
+    </div>
+
     {/* Base URL */}
-    <div>
-      <Label htmlFor="baseUrl">Base URL (Java API)</Label>
+    <div className="mt-4">
+      <Label htmlFor="baseUrl">Base URL (API)</Label>
       <Input
         id="baseUrl"
-        placeholder="http://java-api-host:port/api"
+        placeholder="http://api-host:port/api"
         value={selectedNode.data.config.baseUrl || ""}
         onChange={(e) => updateNodeConfig("baseUrl", e.target.value)}
       />
       <p className="text-xs text-gray-500 mt-1">
-        Базовый URL вашего API. Эндпоинты из входных данных будут добавлены к этому URL.
+        Базовый URL. Эндпоинты из JSON будут добавлены к нему.
       </p>
     </div>
 
@@ -1967,9 +2032,6 @@ useEffect(() => {
           <SelectItem value="parallel">Параллельно</SelectItem>
         </SelectContent>
       </Select>
-      <p className="text-xs text-gray-500 mt-1">
-        Выберите, как выполнять запросы: один за другим или все одновременно.
-      </p>
     </div>
 
     {/* Common Headers */}
@@ -1977,52 +2039,39 @@ useEffect(() => {
       <Label htmlFor="commonHeaders">Общие заголовки (JSON)</Label>
       <Textarea
         id="commonHeaders"
-        placeholder={JSON.stringify({"Authorization": "Bearer YOUR_TOKEN", "Content-Type": "application/json"}, null, 2)}
+        placeholder={JSON.stringify({"Authorization": "Bearer YOUR_TOKEN"}, null, 2)}
         value={selectedNode.data.config.commonHeaders || JSON.stringify({}, null, 2)}
         onChange={(e) => updateNodeConfig("commonHeaders", e.target.value)}
-        rows={4}
+        rows={3}
       />
       <p className="text-xs text-gray-500 mt-1">
-        JSON-объект с заголовками, которые будут добавлены ко всем запросам.
-        Специфичные заголовки из входного JSON могут переопределить эти.
-        Пример: {"{\"X-API-Key\": \"your_key\"}"}
+        JSON-объект с заголовками для всех запросов.
       </p>
     </div>
 
-    {/* Informational Alert */}
-    <Alert className="mt-6"> {/* Добавлен отступ сверху для лучшего разделения */}
-      <AlertCircle className="h-4 w-4" />
+    {/* Пример входного JSON для справки */}
+    <Alert className="mt-6">
+      <Info className="h-4 w-4" />
       <AlertDescription className="text-xs">
-        <p className="font-medium mb-1">Принцип работы ноды:</p>
-        Эта нода ожидает на вход JSON-массив объектов от предыдущей ноды (например, от GigaChat).
-        Каждый объект в массиве должен описывать один HTTP-запрос.
         <p className="mt-2 font-medium">Пример входного JSON:</p>
         <pre className="mt-1 p-2 bg-gray-100 rounded text-[11px] leading-tight overflow-x-auto">
           {`[
   {
     "endpoint": "/resource/1",
-    "method": "GET",
-    "params": {"key": "value"},
-    "headers": {"X-Specific": "value1"}
+    "method": "GET"
   },
   {
-    "endpoint": "/another/resource",
+    "endpoint": "/resource",
     "method": "POST",
-    "body": {"some_payload": "data"},
-    "headers": {"X-Specific": "value2"}
+    "body": {"key": "value"}
   }
 ]`}
         </pre>
-        <p className="mt-2">
-          Нода выполнит эти запросы согласно выбранному режиму и вернет на выход JSON-массив с результатами каждого запроса.
-          Параметры (`params`) для GET запросов будут преобразованы в query string.
-          Для POST/PUT/PATCH запросов, если указано поле `body`, оно будет отправлено как JSON-тело.
-          Поле `headers` в каждом объекте запроса может содержать специфичные для него заголовки.
-        </p>
       </AlertDescription>
     </Alert>
   </>
-                  )}
+)}
+
                   {selectedNode.type === "if_else" && (
                                       <>
                                         <div className="space-y-4">
@@ -2718,6 +2767,17 @@ useEffect(() => {
                 }
               </span>
             </div>
+            <div className="flex items-center justify-between">
+
+              <Button 
+                className="w-full mt-3"
+                variant="outline"
+                onClick={() => setWorkflowResultModalOpen(true)}
+              >
+                {/* <GitBranch className="w-4 h-4 mr-2" /> */}
+                Посмотреть полные результаты
+              </Button>
+            </div>
           </div>
         </div>
       )} 
@@ -2745,6 +2805,27 @@ useEffect(() => {
               <h4 className="font-medium mb-2">Полные данные:</h4>
               <pre className="bg-gray-50 p-3 rounded border overflow-x-auto text-xs">
                 {JSON.stringify(selectedResult.data, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+
+      )}
+      {isWorkflowResultModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl max-h-[80vh] flex flex-col">
+            <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between shrink-0">
+              <h3 className="font-semibold">
+                Полные результаты выполнения Workflow
+              </h3>
+              <Button variant="ghost" size="sm" onClick={() => setWorkflowResultModalOpen(false)}>×</Button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <p className="text-sm text-gray-600 mb-2">
+                Это полный объект с результатами всех выполненных нод. Его можно использовать для составления шаблонов в следующих нодах.
+              </p>
+              <pre className="bg-gray-50 p-3 rounded border overflow-x-auto text-xs">
+                {JSON.stringify(executionResults, null, 2)}
               </pre>
             </div>
           </div>

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import re
 import hashlib
 import os
+import time
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -191,7 +192,7 @@ class GigaChatAPI:
 
         url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
         payload = {
-            "model": "GigaChat",
+            "model": "GigaChat-Pro",
             "messages": messages,
             "temperature": 1,
             "top_p": 0.1,
@@ -497,62 +498,63 @@ class NodeExecutors:
     
     
     async def execute_request_iterator(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Выполнение Request Iterator ноды в соответствии с "Принципом Единого Результата".
+        Использует явный шаблон для получения входных данных.
+        """
+        start_time = datetime.now()
         logger.info(f"Executing Request Iterator node: {node.id}")
         config = node.data.get('config', {})
-        base_url = config.get('baseUrl', '').rstrip('/') # Ensure no trailing slash
-        execution_mode = config.get('executionMode', 'sequential')
-        common_headers_str = config.get('commonHeaders', '{}')
 
-        parsed_common_headers = {}
-        try:
-            parsed_common_headers = json.loads(common_headers_str) if common_headers_str else {}
-            if not isinstance(parsed_common_headers, dict):
-                logger.warning("Common headers is not a valid JSON object, ignoring.")
-                parsed_common_headers = {}
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse common headers JSON, ignoring.")
-            parsed_common_headers = {}
+        # --- 1. Получение входных данных через явный шаблон ---
+        # В UI для этой ноды нужно будет добавить поле "JSON Input"
+        json_input_template = config.get('jsonInput', '')
+        if not json_input_template:
+            raise Exception("Request Iterator: 'jsonInput' template is not configured in the node settings.")
 
-        requests_to_make_json_str = ""
-        if input_data and 'output' in input_data and 'text' in input_data['output']:
-            requests_to_make_json_str = input_data['output']['text']
-        elif input_data and isinstance(input_data.get('requests_array'), list):
-            requests_to_make_json_str = json.dumps(input_data.get('requests_array'))
-        elif isinstance(input_data, list): # If the direct input_data is a list
-             requests_to_make_json_str = json.dumps(input_data)
-        elif isinstance(input_data, str): # If the direct input_data is a JSON string
-             requests_to_make_json_str = input_data
-        else:
-            logger.error("Request Iterator: Input data must contain a JSON string or array of requests.")
-            raise Exception("Request Iterator: Input data must contain a JSON string or array of requests.")
+        logger.info(f"📄 Input template for Request Iterator: {json_input_template}")
+        requests_to_make_json_str = replace_templates(json_input_template, input_data)
 
+        # Проверка, что шаблон сработал и вернул непустую строку
+        if not requests_to_make_json_str or requests_to_make_json_str == json_input_template:
+            logger.warning(f"Template '{json_input_template}' could not be resolved or resulted in an empty string. Assuming empty list of requests.")
+            requests_to_make_json_str = "[]"
+
+        # --- 2. Парсинг JSON (остается как было, но с более чистым входом) ---
         try:
             requests_list = json.loads(requests_to_make_json_str)
             if not isinstance(requests_list, list):
-                # If it's a single object, wrap it in a list
                 if isinstance(requests_list, dict):
-                    logger.info("Request Iterator: Received a single JSON object, wrapping it into a list.")
                     requests_list = [requests_list]
                 else:
                     raise ValueError("Parsed JSON is not a list or a single request object.")
         except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Request Iterator: Failed to parse JSON input: {str(e)}")
-            raise Exception(f"Request Iterator: Invalid JSON input for requests: {str(e)}")
+            raise Exception(f"Request Iterator: Invalid JSON input after template replacement. Error: {str(e)}")
 
         if not requests_list:
             logger.info("Request Iterator: No requests to process from input.")
-            return {
-                "success": True,
-                "executed_requests_count": 0,
-                "responses": [],
-                "output": {"text": "[]"}
+            # Даже если запросов нет, возвращаем стандартный результат
+            node_result = {
+                "text": "[]",
+                "json": [],
+                "meta": { "executed_requests_count": 0, "successful_requests_count": 0, "failed_requests_count": 0 },
+                "inputs": { "jsonInput_template": json_input_template }
             }
+            return node_result
+
+        # --- 3. Основная логика выполнения запросов (остается почти без изменений) ---
+        base_url = config.get('baseUrl', '').rstrip('/')
+        execution_mode = config.get('executionMode', 'sequential')
+        common_headers_str = config.get('commonHeaders', '{}')
+        try:
+            parsed_common_headers = json.loads(common_headers_str) if common_headers_str else {}
+        except json.JSONDecodeError:
+            parsed_common_headers = {}
 
         all_responses = []
         tasks = []
-
-        # It's better to create one session for all requests from this node execution
         async with aiohttp.ClientSession() as session:
+            # --- НАЧАЛО ВСТАВЛЕННОГО БЛОКА ---
             for req_info in requests_list:
                 if not isinstance(req_info, dict):
                     logger.warning(f"Skipping invalid request item (not a dict): {req_info}")
@@ -573,7 +575,6 @@ class NodeExecutors:
                     })
                     continue
                 
-                # Ensure endpoint starts with a slash if base_url is present, or is a full URL
                 if base_url and not endpoint.startswith('/') and not endpoint.lower().startswith(('http://', 'https://')):
                     final_url = f"{base_url}/{endpoint.lstrip('/')}"
                 elif not base_url and not endpoint.lower().startswith(('http://', 'https://')):
@@ -585,26 +586,16 @@ class NodeExecutors:
                     })
                     continue
                 elif endpoint.lower().startswith(('http://', 'https://')):
-                    final_url = endpoint # Endpoint is already a full URL
-                else: # base_url is present and endpoint starts with /
+                    final_url = endpoint
+                else:
                     final_url = f"{base_url}{endpoint}"
 
-
                 method = req_info.get('method', 'GET').upper()
-                
-                # Prepare params for GET and body for POST/PUT etc.
                 get_params = req_info.get('params') if method == 'GET' else None
                 json_body = req_info.get('body') if method in ['POST', 'PUT', 'PATCH'] else None
-                
-                # Merge headers: common_headers < specific_request_headers
                 specific_headers = req_info.get('headers', {})
-                if not isinstance(specific_headers, dict):
-                    logger.warning(f"Specific headers for {final_url} is not a dict, ignoring.")
-                    specific_headers = {}
-
                 final_headers = {**parsed_common_headers, **specific_headers}
 
-                # Create a coroutine for the request
                 task = _make_single_http_request(
                     session,
                     method,
@@ -614,65 +605,72 @@ class NodeExecutors:
                     headers=final_headers
                 )
                 tasks.append(task)
+            # --- КОНЕЦ ВСТАВЛЕННОГО БЛОКА ---
 
             if execution_mode == 'parallel' and tasks:
-                logger.info(f"Request Iterator: Executing {len(tasks)} requests in PARALLEL mode.")
-                # asyncio.gather executes tasks concurrently
-                # return_exceptions=True ensures that if one task fails, others continue and we get the exception
-                gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
-                for result_or_exc in gathered_results:
-                    if isinstance(result_or_exc, Exception):
-                        # This case should ideally be handled within _make_single_http_request itself
-                        # by returning a structured error. If it still gets here, log it.
-                        logger.error(f"Request Iterator: Unhandled exception from parallel task: {result_or_exc}")
-                        all_responses.append({
-                            "error": "Unhandled parallel execution error",
-                            "details": str(result_or_exc),
-                            "success": False,
-                        })
-                    else:
-                        all_responses.append(result_or_exc)
-            elif tasks: # Sequential mode (default)
-                logger.info(f"Request Iterator: Executing {len(tasks)} requests in SEQUENTIAL mode.")
+                all_responses = await asyncio.gather(*tasks, return_exceptions=True)
+            elif tasks:
                 for task_coro in tasks:
-                    result = await task_coro # Await each task one by one
-                    all_responses.append(result)
-            
-        # Filter out any initial error placeholders if they were added before task creation
-        final_responses_list = [r for r in all_responses if r.get("request_url") or r.get("error")]
+                    all_responses.append(await task_coro)
 
-
+        final_responses_list = [r for r in all_responses if not isinstance(r, Exception)]
         logger.info(f"Request Iterator: Processed {len(final_responses_list)} requests.")
-        return {
-            "success": True, # The iterator node itself succeeded in processing
-            "executed_requests_count": len(final_responses_list),
-            "responses": final_responses_list,
-            "output": { # Provide the responses as text for downstream nodes
-                "text": json.dumps(final_responses_list, ensure_ascii=False, indent=2),
-                "json_array": final_responses_list # Also provide as a direct array
+
+        # --- 4. Формирование стандартного объекта результата ---
+        execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        successful_count = sum(1 for r in final_responses_list if r.get('success'))
+        failed_count = len(final_responses_list) - successful_count
+
+        node_result = {
+            "text": json.dumps(final_responses_list, ensure_ascii=False, indent=2),
+            "json": final_responses_list,
+            "meta": {
+                "node_type": node.type,
+                "timestamp": datetime.now().isoformat(),
+                "execution_time_ms": execution_time_ms,
+                "executed_requests_count": len(final_responses_list),
+                "successful_requests_count": successful_count,
+                "failed_requests_count": failed_count,
+            },
+            "inputs": {
+                "baseUrl": base_url,
+                "executionMode": execution_mode,
+                "jsonInput_template": json_input_template,
             }
         }
 
+        # --- 5. Финальный return по "Золотому Правилу" ---
+        return node_result
+
     async def execute_gigachat(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение GigaChat ноды"""
+        start_time = datetime.now()
         logger.info(f"Executing GigaChat node: {node.id}")
         config = node.data.get('config', {})
         auth_token = config.get('authToken')
-        system_message = config.get('systemMessage', 'Ты полезный ассистент')
-        user_message = config.get('userMessage', '')
+        # system_message_template = config.get('systemMessage', 'Ты полезный ассистент')
+        # user_message_template = config.get('userMessage', '')
         clear_history = config.get('clearHistory', False)
 
+        # 1. Всегда инициализируем переменные из шаблонов в конфиге.
+        #    Теперь они гарантированно существуют.
+        system_message = config.get('systemMessage', 'Ты полезный ассистент')
+        user_message = config.get('userMessage', '')
+
+        # Сохраняем оригинальные значения для логирования
+        original_system_message = system_message
+        original_user_message = user_message
         # ДОБАВЛЯЕМ ЛОГИРОВАНИЕ ВХОДНЫХ ДАННЫХ
-        logger.info(f"📥 Входные данные от предыдущей ноды: {json.dumps(input_data, ensure_ascii=False, indent=2)[:500]}...")
         # УНИВЕРСАЛЬНАЯ ЗАМЕНА ШАБЛОНОВ
         if input_data:
-            original_message = user_message
-            user_message = replace_templates(user_message, input_data)
-            # Также заменяем шаблоны в system_message если есть
-            system_message = replace_templates(system_message, input_data)
+            logger.info(f"📥 Входные данные от предыдущей ноды: {json.dumps(input_data, ensure_ascii=False, indent=2)[:500]}...")
             
-            if original_message != user_message:
-                logger.info(f"📝 Сообщение до замены: {original_message}")
+            user_message = replace_templates(original_user_message, input_data)
+            # Также заменяем шаблоны в system_message если есть
+            system_message = replace_templates(original_system_message, input_data)
+            
+            if original_user_message != user_message:
+                logger.info(f"📝 Сообщение до замены: {original_user_message}")
                 logger.info(f"📝 Сообщение после замены: {user_message}")
 
         if not auth_token or not user_message:
@@ -694,13 +692,21 @@ class NodeExecutors:
         if not result.get('success'):
             raise Exception(result.get('error', 'Unknown error'))
 
+        # --- НОВЫЙ БЛОК ОЧИСТКИ ---
+        import re
+        raw_response_text = result.get('response', '')
+        cleaned_response_text = raw_response_text
+        match = re.search(r'```(json)?\s*([\s\S]*?)\s*```', raw_response_text)
+        if match:
+            logger.info("🧹 GigaChat вернул Markdown, извлекаем чистый JSON.")
+            cleaned_response_text = match.group(2)
+        # --- КОНЕЦ БЛОКА ОЧИСТКИ ---
         # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
         # Пытаемся распарсить ответ как JSON, но не ломаемся, если это не он.
-        raw_response_text = result.get('response', '')
         parsed_json = None
         try:
             # Попытка парсинга
-            parsed_json = json.loads(raw_response_text)
+            parsed_json = json.loads(cleaned_response_text)
             logger.info("✅ Ответ от GigaChat успешно распознан как JSON.")
         except json.JSONDecodeError:
             # Если это не JSON, ничего страшного. Просто логируем это.
@@ -708,18 +714,31 @@ class NodeExecutors:
             pass # parsed_json останется None
 
         # Формируем выходные данные для следующих нод
-        # Теперь output содержит и text, и json
-        return {
-            **result, # Включаем все исходные поля из result (success, response и т.д.)
-            "output": {
-                "text": raw_response_text, # Всегда содержит сырой текстовый ответ
-                "json": parsed_json,      # Содержит распарсенный объект или null
-                "question": user_message,
+        # Формируем собственный, уникальный результат этой ноды
+        # --- 4. Формирование стандартного объекта результата ---
+        execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        node_result = {
+            "text": cleaned_response_text,
+            "json": parsed_json,
+            "meta": {
+                "node_type": node.type,
+                "timestamp": datetime.now().isoformat(),
+                "execution_time_ms": execution_time_ms,
+                "conversation_length": result.get("conversation_length", 0),
                 "length": len(raw_response_text),
                 "words": len(raw_response_text.split()),
-                "timestamp": datetime.now().isoformat()
+                "id_node": node.id
+            },
+            "inputs": {
+                "system_message_template": original_system_message,
+                "user_message_template": original_user_message,
+                "final_system_message": system_message,
+                "final_user_message": user_message,
+                "clear_history": clear_history
             }
         }
+        return node_result
 
 
     async def execute_email(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -744,15 +763,13 @@ class NodeExecutors:
         # Пока симулируем
         await asyncio.sleep(1)
 
-        return {
-            "success": True,
+        email_result = {
             "sent": True,
             "to": to,
             "subject": subject,
-            "body": body,
-            "messageId": f"msg_{int(datetime.now().timestamp())}",
-            "inputData": input_data
+            "messageId": f"msg_{int(datetime.now().timestamp())}"
         }
+        return email_result
 
     async def execute_database(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение Database ноды"""
@@ -773,128 +790,118 @@ class NodeExecutors:
         # Пока симулируем
         await asyncio.sleep(1)
 
-        return {
+        db_result = {
             "success": True,
             "rows": [
                 {
                     "id": 1,
-                    "text": input_data.get('output', {}).get('text', 'Sample Data')[:100],
+                    "text": "Sample Data",
                     "created_at": datetime.now().isoformat()
                 }
             ],
             "rowCount": 1,
             "query": query,
-            "connection": connection,
-            "inputData": input_data
+            "connection": connection
         }
 
-    async def execute_webhook(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Выполнение Webhook ноды - отправляет HTTP запрос"""
-        config = node.data.get('config', {})
-        url = config.get('url', '')
-        method = config.get('method', 'POST').upper()
-        headers_str = config.get('headers', 'Content-Type: application/json')
-        
-        # Заменяем шаблоны в URL (например, https://api.com/user/{{input.output.user_id}})
-        if input_data:
-            url = replace_templates(url, input_data)
+        return db_result
 
-        if not url:
-            raise Exception("Webhook URL is required")
-        
-        # Парсим заголовки
-        headers = {}
-        if headers_str:
-            for line in headers_str.strip().split('\n'):
-                if ':' in line:
-                    key, value = line.split(':', 1)
-                    headers[key.strip()] = value.strip()
-        
-        # Подготавливаем данные для отправки
-        # Если есть output.text от предыдущей ноды, используем его
-        payload = input_data
-        if input_data and 'output' in input_data:
-            # Можно отправить либо весь output, либо только text
-            payload = input_data['output']
-        
-        logger.info(f"🌐 Отправка {method} запроса на {url}")
-        if method in ['POST', 'PUT', 'PATCH'] and payload:
-            logger.info(f"📦 Payload: {json.dumps(payload, ensure_ascii=False)[:200]}...")
+    async def execute_webhook(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Выполнение Webhook ноды с новой структурой вывода и явным шаблоном для тела запроса.
+        """
+        start_time = datetime.now()
+        logger.info(f"Executing Webhook node: {node.id}")
+        config = node.data.get('config', {})
+        node_result = {}
         
         try:
-            # Реальная отправка запроса
-            async with aiohttp.ClientSession() as session:
-                # ⬇️ ГЛАВНОЕ ИЗМЕНЕНИЕ: Правильная обработка параметров
-                request_params = {
-                    'method': method,
-                    'url': url,
-                    'headers': headers,
-                    'timeout': aiohttp.ClientTimeout(total=30),
-                    'ssl': False
-                }
+            # --- 1. Получение и обработка входных параметров ---
+            url_template = config.get('url', '')
+            method = config.get('method', 'POST').upper()
+            headers_str = config.get('headers', 'Content-Type: application/json')
+            # НОВОЕ: Получаем шаблон тела запроса
+            body_template = config.get('bodyTemplate', '{}') 
+
+            url = replace_templates(url_template, input_data)
+            if not url:
+                raise Exception("Webhook: URL is required in the node settings.")
+
+            headers = {}
+            if headers_str:
+                for line in headers_str.strip().split('\n'):
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        headers[key.strip()] = value.strip()
             
-                # Добавляем body только для методов, которые его поддерживают
-                if method in ['POST', 'PUT', 'PATCH'] and payload:
-                    request_params['json'] = payload
-                
-                # Для GET запросов НЕ добавляем params из payload
-                # (если нужны query параметры, они должны быть в URL)
-            
-                async with session.request(**request_params) as response:
+            # --- НОВАЯ ЛОГИКА: Формирование payload из шаблона ---
+            payload = None
+            if method in ['POST', 'PUT', 'PATCH']:
+                # Заполняем шаблон данными от предыдущих нод
+                resolved_body_str = replace_templates(body_template, input_data)
+                try:
+                    # Превращаем строку в Python объект (dict/list)
+                    payload = json.loads(resolved_body_str)
+                except json.JSONDecodeError:
+                    raise Exception(f"Invalid JSON in Request Body after template replacement. Result: {resolved_body_str}")
+
+            logger.info(f"🌐 Sending {method} to {url}")
+            if payload:
+                logger.info(f"📦 Payload: {json.dumps(payload, ensure_ascii=False, default=str)[:200]}...")
+
+            # --- 2. Выполнение HTTP запроса ---
+            async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as session:
+                async with session.request(method, url, json=payload, ssl=False) as response:
                     response_text = await response.text()
                     response_json = None
-                    
                     try:
-                        response_json = await response.json()
-                    except:
-                        pass  # Не все ответы в JSON
+                        response_json = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        pass
                     
-                    logger.info(f"✅ Webhook ответ: {response.status}")
-                    
-                    # ⬇️ ДОБАВЛЕНО: Логирование полученных данных для отладки
-                    if response_json and isinstance(response_json, list):
-                        logger.info(f"📊 Получено {len(response_json)} элементов")
-                    
-                    return {
-                        "success": response.status < 400,
-                        "status_code": response.status,
-                        "response": response_text,
-                        "response_json": response_json,
-                        "url": url,
-                        "method": method,
-                        "timestamp": datetime.now().isoformat(),
-                        "output": {
-                            "text": response_text,
-                            "status": response.status,
-                            "json": response_json
+                    logger.info(f"✅ Webhook response: {response.status}")
+
+                    # --- 3. Формирование стандартного объекта результата ---
+                    execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+                    node_result = {
+                        "text": response_text,
+                        "json": response_json,
+                        "meta": {
+                            "node_type": node.type, "timestamp": datetime.now().isoformat(),
+                            "execution_time_ms": execution_time_ms, "success": 200 <= response.status < 300,
+                            "status_code": response.status, "response_headers": dict(response.headers),
+                        },
+                        "inputs": {
+                            "url_template": url_template, "final_url": url, "method": method,
+                            "headers": headers, "body_template": body_template, "final_payload": payload
                         }
                     }
 
-                    
         except aiohttp.ClientError as e:
-            logger.error(f"❌ Ошибка webhook: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "error_type": "connection_error",
-                "url": url,
-                "method": method,
-                "timestamp": datetime.now().isoformat(),
-                "output": {
-                    "text": f"Error: {str(e)}",
-                    "status": 0
-                }
-            }
+            logger.error(f"❌ Connection Error in Webhook node {node.id}: {str(e)}")
+            node_result = self._create_error_result(node, config, f"Connection Error: {str(e)}", "connection_error", input_data)
         except Exception as e:
-            logger.error(f"❌ Неожиданная ошибка webhook: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "error_type": "unexpected_error",
-                "url": url,
-                "method": method,
-                "timestamp": datetime.now().isoformat()
+            logger.error(f"❌ Unexpected Error in Webhook node {node.id}: {str(e)}")
+            node_result = self._create_error_result(node, config, str(e), "unexpected_error", input_data)
+
+        # --- 4. Финальный return по "Золотому Правилу" ---
+        return node_result
+
+    # Вспомогательная функция для создания стандартизированных ошибок
+    def _create_error_result(self, node: Node, config: Dict, error_message: str, error_type: str, input_data: Dict) -> Dict:
+        return {
+            "text": error_message,
+            "json": None,
+            "meta": {
+                "node_type": node.type, "timestamp": datetime.now().isoformat(),
+                "success": False, "error_message": error_message, "error_type": error_type
+            },
+            "inputs": {
+                "url_template": config.get('url', ''), "method": config.get('method', 'POST'),
+                "headers": config.get('headers', ''), "body_template": config.get('bodyTemplate', ''),
+                "input_data_snapshot": input_data # Снимок входных данных на момент ошибки
             }
+        }
 
 
     async def execute_timer(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -927,7 +934,7 @@ class NodeExecutors:
                     current_time = datetime.now()
                     next_execution = current_timer.get("next_execution", current_time + timedelta(minutes=interval))
                     
-                    return {
+                    timer_result = {
                         "success": True,
                         "message": f"Timer is currently executing workflow",
                         "interval": interval,
@@ -935,6 +942,7 @@ class NodeExecutors:
                         "timestamp": current_time.isoformat(),
                         "next_execution": next_execution.isoformat() if isinstance(next_execution, datetime) else next_execution,
                         "timer_id": timer_id,
+                        "timer_result": timer_result,
                         "output": {
                             "text": f"Timer triggered at {current_time.isoformat()}. Timer is currently busy.",
                             "timestamp": current_time.isoformat(),
@@ -942,6 +950,8 @@ class NodeExecutors:
                             "timezone": timezone
                         }
                     }
+                    return timer_result
+                    
             # 🔴 КОНЕЦ ДОБАВЛЕННОГО БЛОКА
 
             # Получаем ID текущего workflow из имени
@@ -984,8 +994,7 @@ class NodeExecutors:
             # Формируем выходные данные для следующих нод
             current_time = datetime.now()
             next_execution = current_time + timedelta(minutes=interval)
-            
-            return {
+            timer_result = {
                 "success": True,
                 "message": f"Timer triggered at {current_time.isoformat()}",
                 "interval": interval,
@@ -998,100 +1007,137 @@ class NodeExecutors:
                     "timestamp": current_time.isoformat(),
                     "interval": interval,
                     "timezone": timezone
-                }
+                }            
             }
+            return timer_result
         except Exception as e:
             logger.error(f"❌ Ошибка выполнения Timer ноды: {str(e)}")
-            raise Exception(f"Timer execution failed: {str(e)}")
+            # --- ИЗМЕНЕНО: Возвращаем стандартизированную ошибку ---
+            return {
+                "success": False,
+                "error": f"Timer execution failed: {str(e)}",
+                "text": f"Timer execution failed: {str(e)}"
+            }
     
+    # Вспомогательная функция, которую можно разместить внутри класса NodeExecutors или перед ним
+    def _extract_text_from_data(self, data: Any) -> str:
+        """Рекурсивно ищет наиболее подходящий текст в данных."""
+        if isinstance(data, str):
+            return data
+        if not isinstance(data, dict):
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        # Приоритетный поиск
+        if 'text' in data and isinstance(data['text'], str):
+            return data['text']
+        if 'output' in data and isinstance(data['output'], dict) and 'text' in data['output'] and isinstance(data['output']['text'], str):
+            return data['output']['text']
+        
+        # Если не нашли, ищем в любом значении
+        for value in data.values():
+            if isinstance(value, dict):
+                found_text = self._extract_text_from_data(value)
+                if found_text:
+                    return found_text
+            elif isinstance(value, str):
+                return value # Возвращаем первое попавшееся строковое значение
+
+        # Если ничего не найдено, возвращаем строковое представление всего объекта
+        return json.dumps(data, ensure_ascii=False, indent=2)
+
+
     async def execute_join(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Выполнение Join/Merge ноды"""
+        """
+        Выполнение интеллектуальной Join/Merge ноды, которая находит общие данные,
+        изолирует уникальные и формирует чистый результат.
+        """
         config = node.data.get('config', {})
-        wait_for_all = config.get('waitForAll', True)
         merge_strategy = config.get('mergeStrategy', 'combine_text')
         separator = config.get('separator', '\n\n---\n\n').replace('\\n', '\n')
         
-        logger.info(f"🔀 Выполнение Join/Merge ноды: {node.id}")
-        logger.info(f"📥 Стратегия: {merge_strategy}")
+        logger.info(f"🔀 Выполнение интеллектуальной Join/Merge ноды: {node.id}")
         
-        # input_data должен содержать словарь inputs с данными от всех источников
         inputs = input_data.get('inputs', {})
-        
         if not inputs:
-            raise Exception("Join node requires input data from at least one source")
+            return {**input_data, "join_result": {"error": "No inputs to join"}, "success": False}
         
-        logger.info(f"📊 Получены данные от {len(inputs)} источников: {list(inputs.keys())}")
+        # Если вход только один, просто пробрасываем его дальше
+        if len(inputs) == 1:
+            return list(inputs.values())[0]
+
+        # --- Магия начинается здесь ---
+
+        # Шаг 1: Находим общие данные
+        all_input_dicts = list(inputs.values())
+        first_input = all_input_dicts[0]
+        other_inputs = all_input_dicts[1:]
         
-        result = {}
+        common_data = {}
+        for key, value in first_input.items():
+            # Для простоты сравниваем значения напрямую. Для сложных объектов может потребоваться deep comparison.
+            # Проверяем, что ключ и значение идентичны во всех остальных входах
+            if all(key in other and other[key] == value for other in other_inputs):
+                common_data[key] = value
         
+        logger.info(f"🔍 Найдены общие данные: {list(common_data.keys())}")
+
+        # Шаг 2: Изолируем уникальные данные для каждой ветки
+        unique_data_per_source = {}
+        for source_id, source_dict in inputs.items():
+            unique_data = {k: v for k, v in source_dict.items() if k not in common_data}
+            unique_data_per_source[source_id] = unique_data
+
+        # Шаг 3: Формируем результат в зависимости от стратегии
+        join_result = {}
+        output_data = {}
+
         if merge_strategy == 'combine_text':
-            # Объединяем все тексты
             texts = []
-            for i, (source_id, data) in enumerate(inputs.items()):
-                # Извлекаем текст из разных возможных мест
-                text = ""
-                if isinstance(data, dict):
-                    if 'output' in data and 'text' in data['output']:
-                        text = data['output']['text']
-                    elif 'response' in data:
-                        text = data['response']
-                    elif 'text' in data:
-                        text = data['text']
-                    else:
-                        # Если не нашли текст, конвертируем в строку
-                        text = json.dumps(data, ensure_ascii=False, indent=2)
-                else:
-                    text = str(data)
-                
-                texts.append(f"=== Источник {i+1} ({source_id}) ===\n{text}")
+            for source_id, unique_data in unique_data_per_source.items():
+                # Используем вспомогательную функцию для извлечения текста
+                text = self._extract_text_from_data(unique_data)
+                texts.append(f"=== Источник {source_id} ===\n{text}")
             
             combined_text = separator.join(texts)
-            
-            result = {
-                'output': {
-                    'text': combined_text,
-                    'source_count': len(inputs),
-                    'sources': list(inputs.keys())
-                },
-                'success': True
+            output_data = {
+                'text': combined_text,
+                'source_count': len(inputs)
             }
-            
             logger.info(f"✅ Объединено {len(texts)} текстов")
-            
+
         elif merge_strategy == 'merge_json':
-            # Объединяем все данные в единый JSON
-            merged_data = {
-                'sources': {},
-                'metadata': {
-                    'source_count': len(inputs),
-                    'merge_time': datetime.now().isoformat(),
-                    'source_ids': list(inputs.keys())
-                }
+            # В этой стратегии мы просто показываем уникальные данные
+            output_data = {
+                'json': unique_data_per_source,
+                'text': json.dumps(unique_data_per_source, ensure_ascii=False, indent=2),
+                'source_count': len(inputs)
             }
-            
-            # Добавляем данные от каждого источника
-            for source_id, data in inputs.items():
-                merged_data['sources'][source_id] = data
-            
-            result = {
-                'output': {
-                    'text': json.dumps(merged_data, ensure_ascii=False, indent=2),
-                    'json': merged_data,
-                    'source_count': len(inputs),
-                    'sources': list(inputs.keys())
-                },
-                'success': True
-            }
-            
             logger.info(f"✅ Объединены данные в JSON от {len(inputs)} источников")
-        
+
         else:
             raise Exception(f"Unknown merge strategy: {merge_strategy}")
+
+        # Шаг 4: Собираем финальный, идеальный return
+        final_result = {
+            **common_data,  # 1. Выносим общие данные на верхний уровень
+            "join_result": { # 2. Создаем уникальный результат для самой Join ноды
+                "sources": unique_data_per_source,
+                "metadata": {
+                    "source_count": len(inputs),
+                    "source_ids": list(inputs.keys()),
+                    "merge_strategy": merge_strategy,
+                    "merge_time": datetime.now().isoformat()
+                }
+            },
+            "output": output_data, # 3. Добавляем удобный output
+            "success": True
+        }
         
-        return result
+        return final_result
 
     async def execute_if_else(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение If/Else ноды"""
+        start_time = time.time()
         config = node.data.get('config', {})
         condition_type = config.get('conditionType', 'equals')
         field_path = config.get('fieldPath', 'output.text')
@@ -1193,6 +1239,7 @@ class NodeExecutors:
                 'condition_met': result,
                 'checked_value': str(actual_value),
                 'condition': f"{field_path} {condition_type} {compare_value}",
+                'node_id': node.id
             }
         }
 
@@ -1228,9 +1275,9 @@ class NodeExecutors:
                 raise Exception("Dispatcher: GigaChat auth token is required for AI mode.")
 
             classification_prompt = f"""Определи категорию запроса пользователя и выбери подходящий обработчик.
-Доступные категории: {json.dumps(list(workflow_routes.keys()), ensure_ascii=False)}
-Запрос пользователя: {user_query}
-Ответь ТОЛЬКО одним словом - названием категории."""
+            Доступные категории: {json.dumps(list(workflow_routes.keys()), ensure_ascii=False)}
+            Запрос пользователя: {user_query}
+            Ответь ТОЛЬКО одним словом - названием категории."""
             
             # Получаем токен и делаем запрос
             if await self.gigachat_api.get_token(auth_token):
@@ -1740,7 +1787,6 @@ async def update_webhook(webhook_id: str, request: WebhookCreateRequest):
 async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_input_data: Optional[Dict[str, Any]] = None):
     """Внутренняя функция выполнения workflow (без HTTP обертки)"""
     logs = []
-    # НОВОЕ: Очищаем счетчики goto при новом выполнении
     global goto_execution_counter
     goto_execution_counter.clear()
 
@@ -1748,45 +1794,36 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
         logger.info(f"🚀 Запуск workflow с {len(request.nodes)} нодами")
         if initial_input_data:
             logger.info(f"💡 Workflow запущен с начальными данными: {json.dumps(initial_input_data, default=str, indent=2)[:300]}...")
-        
-        # Детальное логирование нод и соединений (из старой версии)
+
         for node in request.nodes:
             logger.info(f"📋 Нода {node.id} типа {node.type}: {node.data.get('label', 'Без метки')}")
-        
         logger.info(f"🔗 Соединения: {len(request.connections)}")
         for conn in request.connections:
             logger.info(f"🔗 Соединение: {conn.source} -> {conn.target}")
-        
-        # Хранилище для накопления данных для join нод
+
         join_node_data = {}
-        
-        # Находим стартовую ноду
+
         start_node = None
         if request.startNodeId:
             start_node = next((n for n in request.nodes if n.id == request.startNodeId), None)
             logger.info(f"🎯 Используем указанную стартовую ноду: {request.startNodeId}")
         else:
-            # Ищем ноду без входящих соединений
             node_ids_with_inputs = {conn.target for conn in request.connections}
-            startable_types = ['gigachat', 'webhook', 'timer']
-            
+            startable_types = ['gigachat', 'webhook', 'timer', 'webhook_trigger']
             start_candidates = [
-                n for n in request.nodes 
+                n for n in request.nodes
                 if n.type in startable_types and n.id not in node_ids_with_inputs
             ]
-            
             if start_candidates:
                 start_node = start_candidates[0]
                 logger.info(f"🔍 Найдена стартовая нода без входящих соединений: {start_node.id}")
             else:
-                # Если все ноды имеют входящие соединения, берем любую стартовую
                 start_node = next((n for n in request.nodes if n.type in startable_types), None)
                 logger.info(f"⚠️ Все ноды имеют входящие соединения, берем первую доступную: {start_node.id if start_node else 'None'}")
 
         if not start_node:
             raise Exception("No startable node found")
 
-        # Если это нода Timer, обновляем информацию о workflow в таймере
         if start_node.type == "timer":
             timer_id = f"timer_{start_node.id}"
             if timer_id in active_timers:
@@ -1796,72 +1833,67 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                     "startNodeId": start_node.id
                 }
 
-        # Выполняем workflow
-        results = {}
-        
-        
-        async def execute_node_recursive(node_id: str, input_data: Dict[str, Any] = None, source_node_id: str = None, is_first_node: bool = False):
+        # ИЗМЕНЕНО: Это теперь главный контейнер для ВСЕХ результатов
+        workflow_results = {}
+
+        async def execute_node_recursive(node_id: str, source_node_id: str = None):
             node = next((n for n in request.nodes if n.id == node_id), None)
             if not node:
-                return None
+                return
 
-            # Если это первая нода И есть initial_input_data, используем их
-            if is_first_node and initial_input_data:
-                input_data = initial_input_data
-                logger.info(f"💡 Стартовая нода {node_id} получила начальные данные от вебхука")
-            
+            # ИЗМЕНЕНО: Определяем входные данные для текущей ноды
+            current_input_data = {}
+            if source_node_id:
+                # Для обычных нод входные данные - это ВЕСЬ контейнер результатов
+                current_input_data = workflow_results
+            elif initial_input_data:
+                 # Для самой первой ноды - это начальные данные
+                current_input_data = initial_input_data
+
             # Специальная обработка для webhook ноды
-            if node.type == 'webhook_trigger' and is_first_node:
+            if node.type == 'webhook_trigger' and not source_node_id:
                 logger.info(f"🔔 Webhook нода {node_id} активирована")
-                # Webhook нода просто передает полученные данные дальше
-                result = {
+                # Webhook нода просто формирует свой первый результат
+                node_result = {
                     "success": True,
-                    "output": input_data,
+                    "output": current_input_data,
                     "message": "Webhook data received"
                 }
-                results[node_id] = result
-                
-                # Передаем данные следующим нодам
+                workflow_results[node_id] = node_result # Сохраняем результат
+
+                # Передаем управление следующим нодам
                 next_connections = [c for c in request.connections if c.source == node_id]
                 for connection in next_connections:
-                    await execute_node_recursive(connection.target, result, node_id, False)
-                
-                return result
-            
-            # Проверяем, является ли это join нодой с множественными входами
+                    await execute_node_recursive(connection.target, node_id)
+                return
+
+            # Проверка на join ноду
             incoming_connections = [c for c in request.connections if c.target == node_id]
-            
             if node.type == 'join' and len(incoming_connections) > 1:
-                # Это join нода - накапливаем данные
                 if node_id not in join_node_data:
                     join_node_data[node_id] = {
                         'expected_sources': set(c.source for c in incoming_connections),
                         'received_data': {}
                     }
-                
-                # Сохраняем данные от текущего источника
                 if source_node_id:
-                    join_node_data[node_id]['received_data'][source_node_id] = input_data
+                    # ИЗМЕНЕНО: Сохраняем результат конкретной предыдущей ноды
+                    join_node_data[node_id]['received_data'][source_node_id] = workflow_results.get(source_node_id)
                     logger.info(f"🔀 Join нода {node_id} получила данные от {source_node_id}")
                     logger.info(f"📊 Ожидается: {join_node_data[node_id]['expected_sources']}")
                     logger.info(f"📊 Получено от: {set(join_node_data[node_id]['received_data'].keys())}")
-                
-                # Проверяем, получили ли мы данные от всех источников
+
                 received_sources = set(join_node_data[node_id]['received_data'].keys())
                 expected_sources = join_node_data[node_id]['expected_sources']
-                
+
                 if node.data.get('config', {}).get('waitForAll', True):
                     if received_sources != expected_sources:
-                        # Еще не все данные получены
                         logger.info(f"⏳ Join нода {node_id} ждет данные от {expected_sources - received_sources}")
-                        return None
-                
-                # Все данные получены или не ждем всех - выполняем join
-                input_data = {'inputs': join_node_data[node_id]['received_data']}
-                
-                # Очищаем временные данные
+                        return # Выходим и ждем, пока другие ветки дойдут до этой ноды
+
+                # Все данные получены, формируем вход для join ноды
+                current_input_data = {'inputs': join_node_data[node_id]['received_data']}
                 del join_node_data[node_id]
-            
+
             # Логируем выполнение
             logs.append({
                 "message": f"Executing {node.data.get('label', node.type)}...",
@@ -1870,7 +1902,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                 "nodeId": node_id
             })
 
-            # Выполняем ноду
+            # Выбираем и выполняем ноду
             executor_map = {
                 'gigachat': executors.execute_gigachat,
                 'email': executors.execute_email,
@@ -1880,14 +1912,17 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                 'join': executors.execute_join,
                 'request_iterator': executors.execute_request_iterator,
                 'if_else': executors.execute_if_else,
-                'dispatcher': executors.execute_dispatcher # НОВОЕ
+                'dispatcher': executors.execute_dispatcher
             }
 
             executor = executor_map.get(node.type)
             if executor:
-                result = await executor(node, input_data or {})
-                results[node_id] = result
-                
+                # ИЗМЕНЕНО: Вызываем executor с подготовленными данными
+                node_result = await executor(node, current_input_data)
+
+                # ИЗМЕНЕНО: Сохраняем ИЗОЛИРОВАННЫЙ результат ноды в общий контейнер
+                workflow_results[node_id] = node_result
+
                 logs.append({
                     "message": f"{node.data.get('label', node.type)} completed successfully",
                     "timestamp": datetime.now().isoformat(),
@@ -1895,81 +1930,65 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                     "nodeId": node_id
                 })
 
-                # Находим следующие ноды
+                # Находим следующие ноды для перехода
                 next_connections = [c for c in request.connections if c.source == node_id]
 
-                # НОВОЕ: Специальная обработка для If/Else ноды
-                if node.type == 'if_else' and 'branch' in result:
-                    branch = result['branch']  # 'true' или 'false'
-                    
-                    # ДОБАВЬТЕ ЗДЕСЬ (после строки 1097):
+                # Специальная обработка для If/Else ноды
+                if node.type == 'if_else' and 'branch' in node_result:
+                    branch = node_result['branch']
                     logger.info(f"🔍 If/Else нода {node_id} вернула branch: {branch}")
-                    logger.info(f"🔍 Найдено соединений: {len(next_connections)}")
-                    for conn in next_connections:
-                        logger.info(f"  - {conn.id}: label='{conn.data.get('label', 'none')}'")
 
-                    # Фильтруем соединения по метке
                     filtered_connections = []
                     goto_connections = []
-                    
+
                     for conn in next_connections:
                         conn_label = conn.data.get('label', '').lower() if conn.data else ''
-                        
-                        # Проверяем goto соединения
                         if conn_label == f"{branch}:goto":
                             goto_connections.append(conn)
                         elif conn_label == branch:
                             filtered_connections.append(conn)
-                    
-                    # Сначала проверяем goto соединения
+
                     if goto_connections:
                         for goto_conn in goto_connections:
-                            # Проверяем защиту от циклов
                             goto_key = f"{node_id}_to_{goto_conn.target}"
-                            if goto_key not in goto_execution_counter:
-                                goto_execution_counter[goto_key] = 0
-                            
+                            goto_execution_counter.setdefault(goto_key, 0)
                             goto_execution_counter[goto_key] += 1
                             max_iterations = node.data.get('config', {}).get('maxGotoIterations', 10)
-                            
+
                             if goto_execution_counter[goto_key] > max_iterations:
                                 logger.error(f"🔄 Превышен лимит goto переходов ({max_iterations}) для {goto_key}")
-                                return {
-                                    'success': False,
-                                    'error': f'Exceeded max goto iterations ({max_iterations})',
-                                    'branch': branch,
-                                    'goto_iterations': goto_execution_counter[goto_key]
-                                }
-                            
-                            logger.info(f"🔄 Активирован goto переход к {goto_conn.target} (итерация {goto_execution_counter[goto_key]})")
-                            await execute_node_recursive(goto_conn.target, result, node_id, False)
-                        
-                        # После goto не выполняем обычные соединения
-                        return result
-                    
-                    # Если нет goto, выполняем обычные соединения
-                    for connection in filtered_connections:
-                        await execute_node_recursive(connection.target, result, node_id)
-                else:
-                    # Для остальных типов нод - обычное выполнение
-                    for connection in next_connections:
-                        await execute_node_recursive(connection.target, result, node_id)
+                                continue
 
-                return result
+                            logger.info(f"🔄 Активирован goto переход к {goto_conn.target} (итерация {goto_execution_counter[goto_key]})")
+                            # ИЗМЕНЕНО: Рекурсивный вызов без прямой передачи данных
+                            await execute_node_recursive(goto_conn.target, node_id)
+                        return # После goto не выполняем обычные соединения
+
+                    for connection in filtered_connections:
+                        # ИЗМЕНЕНО: Рекурсивный вызов без прямой передачи данных
+                        await execute_node_recursive(connection.target, node_id)
+                else:
+                    # Для всех остальных типов нод
+                    for connection in next_connections:
+                        # ИЗМЕНЕНО: Рекурсивный вызов без прямой передачи данных
+                        await execute_node_recursive(connection.target, node_id)
             else:
                 raise Exception(f"Unknown node type: {node.type}")
 
-        # Запускаем выполнение
-        await execute_node_recursive(start_node.id, is_first_node=True)
+        # Запускаем выполнение с самой первой ноды
+        await execute_node_recursive(start_node.id)
 
+        # ИЗМЕНЕНО: Возвращаем ВЕСЬ контейнер с результатами, а не последний результат
         return ExecutionResult(
             success=True,
-            result=results,
+            result=workflow_results,
             logs=logs
         )
 
     except Exception as e:
         logger.error(f"❌ Ошибка выполнения workflow: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc()) # Добавим трассировку для лучшей отладки
         return ExecutionResult(
             success=False,
             error=str(e),
