@@ -8,7 +8,7 @@ API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 # LOCAL_WORKFLOW_URL = f"http://localhost:8000/execute-workflow/sales_consultation?startNodeId={START_NODE_ID}"
 # LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/sales_consultation"
 # LOCAL_WORKFLOW_URL = "http://localhost:8000/execute-workflow/fitness_sales_bot"
-LOCAL_WORKFLOW_URL = "http://localhost:8000/webhooks/fffdaab0-bf8c-47f3-bce5-1415840e5c78"
+LOCAL_WORKFLOW_URL = "http://localhost:8000/webhooks/e4a653ca-8069-4530-b36d-53ff471e4e80"
 
 
 async def get_updates(offset=0):

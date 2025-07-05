@@ -120,4 +120,36 @@ export interface NodeData {
       throw new Error(`Failed to delete workflow ${id}`);
     }
   };
+
+  // ... (другие ваши импорты и функции)
+
+// НОВОЕ: Тип для данных ноды, если он еще не определен глобально
+interface Node {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: {
+    label: string;
+    config: Record<string, any>;
+  };
+}
+
+// НОВОЕ: Функция для вызова эндпоинта настройки таймера
+export const setupTimer = async (node: Node, workflow_id: string): Promise<any> => {
+  const response = await fetch(`${API_BASE_URL}/setup-timer`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ node, workflow_id }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || 'Failed to set up timer');
+  }
+
+  return response.json();
+};
+
   

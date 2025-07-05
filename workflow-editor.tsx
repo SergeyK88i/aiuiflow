@@ -310,33 +310,71 @@ const handleCloneWorkflow = async (sourceId: string, sourceName: string) => {
 };
 
 // НОВОЕ: Универсальная функция сохранения
+// НОВОЕ: Универсальная функция сохранения с настройкой таймера
 const handleSave = async () => {
   setIsSaving(true);
+  let savedWorkflowId: string | null = currentWorkflowId;
+  let savedWorkflowName: string = currentWorkflowName;
+
   try {
       const workflowData = { nodes, connections };
+
       if (currentWorkflowId) {
-          // Обновляем существующий
+          // --- ОБНОВЛЕНИЕ СУЩЕСТВУЮЩЕГО WORKFLOW ---
           await api.updateWorkflow(currentWorkflowId, workflowData);
-          console.log(`Workflow "${currentWorkflowName}" updated.`);
-          // Опционально: показать уведомление об успехе
+          console.log(`✅ Workflow "${currentWorkflowName}" updated.`);
       } else {
-          // Создаем новый
+          // --- СОЗДАНИЕ НОВОГО WORKFLOW ---
           const name = prompt("Введите имя для нового workflow:", "Мой новый workflow");
           if (name) {
               const result = await api.createWorkflow(name, workflowData);
+              // Сохраняем ID и имя нового workflow для последующих шагов
+              savedWorkflowId = result.workflow_id;
+              savedWorkflowName = name;
+              
               setCurrentWorkflowId(result.workflow_id);
               setCurrentWorkflowName(name);
               await loadWorkflowsList(); // Обновляем список, чтобы он появился в модалке
-              console.log(`Workflow "${name}" created with id ${result.workflow_id}.`);
+              console.log(`✅ Workflow "${name}" created with id ${result.workflow_id}.`);
+          } else {
+              // Пользователь отменил ввод имени
+              setIsSaving(false);
+              return;
           }
       }
+
+      // --- НОВЫЙ БЛОК: НАСТРОЙКА ТАЙМЕРА ПОСЛЕ СОХРАНЕНИЯ ---
+      // Проверяем, есть ли в workflow нода таймера
+      const timerNode = nodes.find(n => n.type === 'timer');
+
+      // Если есть нода таймера и у нас есть ID workflow...
+      if (timerNode && savedWorkflowId) {
+          console.log(`🕒 Found timer node (${timerNode.id}). Setting up schedule for workflow ${savedWorkflowId}...`);
+          try {
+              // ...вызываем новый эндпоинт для настройки расписания
+              const timerResult = await api.setupTimer(timerNode, savedWorkflowId);
+              console.log(`✅ Timer setup successful:`, timerResult.message);
+              // Опционально: можно показать уведомление об успехе
+              // alert("Расписание для workflow успешно настроено!");
+              
+              // Обновляем список активных таймеров в UI
+              await loadTimers();
+
+          } catch (error) {
+              console.error("❌ Failed to set up timer:", error);
+              alert(`Ошибка настройки расписания: ${error.message}`);
+          }
+      }
+      // --- КОНЕЦ НОВОГО БЛОКА ---
+
   } catch (error) {
-      console.error("Failed to save workflow:", error);
-      // Тут можно показать уведомление об ошибке
+      console.error("❌ Failed to save workflow:", error);
+      alert(`Ошибка сохранения workflow: ${error.message}`);
   } finally {
       setIsSaving(false);
   }
 };
+
 // Функция для создания нового "безымянного" workflow на холсте
 const handleNewWorkflow = () => {
   setNodes([]);
