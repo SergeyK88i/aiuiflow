@@ -969,7 +969,7 @@ useEffect(() => {
       gigachat: {
         role: "assistant", // Добавляем роль по умолчанию
         authToken:
-          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
         systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
         userMessage: "Привет! Расскажи что-нибудь интересное о программировании.",
         clearHistory: false,
@@ -1422,6 +1422,42 @@ useEffect(() => {
         : null,
     )
   }
+  // НОВАЯ ФУНКЦИЯ
+  const updateNodeData = (field: 'label', value: string) => {
+    if (!selectedNode) return;
+
+    const trimmedValue = value.trim();
+
+    // Проверка на уникальность лейбла (только если это не текущая нода)
+    if (field === 'label') {
+      if (!trimmedValue) {
+        alert("Имя ноды (label) не может быть пустым.");
+        // "Отряхиваем" состояние, чтобы UI вернул старое значение
+        setNodes(prev => [...prev]);
+        return;
+      }
+      const isDuplicate = nodes.some(n => n.id !== selectedNode.id && n.data.label === trimmedValue);
+      if (isDuplicate) {
+        alert(`Имя ноды "${trimmedValue}" уже используется. Имена должны быть уникальными.`);
+        setNodes(prev => [...prev]);
+        return;
+      }
+    }
+
+    // Обновляем состояние нод и выбранной ноды
+    const newNodes = nodes.map(node =>
+      node.id === selectedNode.id
+        ? { ...node, data: { ...node.data, [field]: trimmedValue } }
+        : node
+    );
+    setNodes(newNodes);
+
+    setSelectedNode(prev =>
+      prev
+        ? { ...prev, data: { ...prev.data, [field]: trimmedValue } }
+        : null
+    );
+  };
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -1545,6 +1581,52 @@ useEffect(() => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    <div className="space-y-2 border-b pb-4">
+                      <Label htmlFor="nodeLabel" className="font-semibold">
+                        Имя ноды (Label)
+                      </Label>
+                      <div className="relative flex items-center">
+                        <Input
+                          id="nodeLabel"
+                          value={selectedNode.data.label || ''}
+                          onChange={(e) => {
+                            // Временно обновляем UI для отзывчивости
+                            const newLabel = e.target.value;
+                            setSelectedNode(prev => prev ? { ...prev, data: { ...prev.data, label: newLabel } } : null);
+                          }}
+                          onBlur={(e) => {
+                            // Финальное обновление с валидацией при потере фокуса
+                            updateNodeData('label', e.target.value);
+                          }}
+                          placeholder="Например: Получить данные клиента"
+                          className="pr-10" // Место для кнопки
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-gray-500 hover:text-gray-800"
+                          title="Скопировать переменную шаблона"
+                          onClick={() => {
+                            if (!selectedNode.data.label) {
+                              alert("Сначала введите имя ноды.");
+                              return;
+                            }
+                            const template = `{{${selectedNode.data.label}}}`;
+                            navigator.clipboard.writeText(template);
+                            alert(`Шаблон "${template}" скопирован в буфер обмена!`);
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Уникальное имя для ссылки в шаблонах. Например:{" "}
+                        <code className="bg-muted px-1 py-0.5 rounded">
+                          {"{{Имя ноды.output.text}}"}
+                        </code>
+                      </p>
+                    </div>
+
                   {selectedNode.type === "gigachat" && (
                     <>
                       <div>
@@ -2291,13 +2373,7 @@ useEffect(() => {
 
                       return (
                         <>
-                          <div className="p-4 border-b">
-                            <Label>Лейбл ноды</Label>
-                            <Input
-                              value={selectedNode.data.label || ''}
-                              onChange={(e) => updateNodeData('label', e.target.value)}
-                            />
-                          </div>
+                          
                           <div className="p-4 space-y-4">
                             <h3 className="text-lg font-semibold">Настройки Диспетчера</h3>
                             <div className="flex items-center space-x-2">

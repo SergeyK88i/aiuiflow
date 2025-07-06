@@ -193,7 +193,7 @@
                     "y": 100.0
                 },
                 "data": {
-                    "label": "Таймер каждую минуту",
+                    "label": "Таймер_1_минута",
                     "config": {
                         "interval": 1
                     }
@@ -224,7 +224,7 @@
             }
         ],
         "created_at": "2025-06-25T22:06:45.243317",
-        "updated_at": "2025-07-05T23:45:50.965542"
+        "updated_at": "2025-07-06T11:07:24.485874"
     },
     "sales_consultation": {
         "name": "sales_consultation",
@@ -895,10 +895,10 @@
                     "y": 140.0
                 },
                 "data": {
-                    "label": "GigaChat AI",
+                    "label": "ai",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "твоя задача выбрать ОДИН  get запросы из предложенного массив и в ответе вернуть один объект json без массива, кроме json больше нечего не пиши\n[\n  {\n    \"endpoint\": \"/users/1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/posts\",\n    \"method\": \"POST\",\n    \"body\": {\n      \"title\": \"Test\",\n      \"body\": \"Hello\",\n      \"userId\": 1\n    }\n  },\n  {\n    \"endpoint\": \"/comments?postId=1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/todos/5\",\n    \"method\": \"PATCH\",\n    \"body\": {\n      \"completed\": true\n    }\n  },\n  {\n    \"endpoint\": \"/albums\",\n    \"method\": \"GET\"\n  }\n]\n",
                         "clearHistory": false
@@ -915,27 +915,9 @@
                 "data": {
                     "label": "Send Webhook",
                     "config": {
-                        "url": "https://jsonplaceholder.typicode.com/{{ node-1751391253489.json.endpoint }}",
+                        "url": "https://jsonplaceholder.typicode.com/{{ ai.json.endpoint }}",
                         "method": "GET",
                         "headers": "Content-Type: application/json"
-                    }
-                }
-            },
-            {
-                "id": "node-1751402270789",
-                "type": "gigachat",
-                "position": {
-                    "x": 726.0,
-                    "y": 401.0
-                },
-                "data": {
-                    "label": "GigaChat AI",
-                    "config": {
-                        "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
-                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
-                        "userMessage": "Привет! Расскажи что-нибудь интересное о программировании.",
-                        "clearHistory": false
                     }
                 }
             }
@@ -946,16 +928,10 @@
                 "source": "node-1751391253489",
                 "target": "node-1751391980796",
                 "data": {}
-            },
-            {
-                "id": "node-1751391980796-node-1751402270789-1751695498996",
-                "source": "node-1751391980796",
-                "target": "node-1751402270789",
-                "data": {}
             }
         ],
         "created_at": "2025-07-05T09:04:34.692187",
-        "updated_at": "2025-07-05T09:12:46.782914"
+        "updated_at": "2025-07-06T01:03:33.630672"
     },
     "testiruem_timer": {
         "name": "testiruem timer",

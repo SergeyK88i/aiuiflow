@@ -161,6 +161,14 @@ class GigaChatAPI:
         """Получение токена доступа"""
         rq_uid = str(uuid.uuid4())
         url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+
+         # --- НОВЫЙ БЛОК ДЛЯ НАДЕЖНОСТИ ---
+        # На случай, если пользователь случайно скопировал "Basic " вместе с токеном
+        if auth_token and auth_token.lower().startswith('basic '):
+            logger.warning("⚠️ Обнаружен префикс 'Basic ' в токене. Удаляю его автоматически.")
+            auth_token = auth_token[6:]
+        # --- КОНЕЦ НОВОГО БЛОКА ---
+
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
@@ -170,6 +178,10 @@ class GigaChatAPI:
         payload = {'scope': scope}
 
         try:
+            # --- НОВОЕ ЛОГИРОВАНИЕ ДЛЯ ОТЛАДКИ ---
+            logger.info(f"🔑 Попытка получить токен. URL: {url}")
+            logger.info(f"📋 Отправляемые заголовки: {headers}")
+            # --- КОНЕЦ НОВОГО ЛОГИРОВАНИЯ ---
             # В реальном приложении используйте aiohttp для асинхронных запросов
             response = requests.post(url, headers=headers, data=payload, verify=False)
             if response.status_code == 200:
@@ -178,6 +190,13 @@ class GigaChatAPI:
                 return True
             else:
                 logger.error(f"❌ Ошибка получения токена: {response.status_code}")
+                # --- САМОЕ ВАЖНОЕ: ЛОГИРУЕМ ТЕЛО ОТВЕТА ---
+                try:
+                    error_details = response.json()
+                    logger.error(f"🔍 Детали ошибки от GigaChat: {error_details}")
+                except json.JSONDecodeError:
+                    logger.error(f"🔍 Ответ от GigaChat (не JSON): {response.text}")
+                # --- КОНЕЦ ВАЖНОГО БЛОКА ---
                 return False
         except Exception as e:
             logger.error(f"❌ Ошибка при получении токена: {str(e)}")
@@ -349,37 +368,72 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
 
 
 
-def replace_templates(text: str, data: Dict[str, Any]) -> str:
-        """Универсальная замена шаблонов вида {{path.to.value}}"""
+# Замени свою старую функцию replace_templates на эту
+def replace_templates(text: str, data: Dict[str, Any], label_to_id_map: Dict[str, str]) -> str:
+    """Универсальная замена шаблонов вида {{Node Label.path.to.value}} или {{node-id.path.to.value}}"""
+
+    def get_nested_value(obj: Dict[str, Any], path: str) -> Any:
+        """Получает значение по пути типа 'node-id.output.text'"""
+        keys = path.split('.')
+        current = obj
+        for key in keys:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            # НОВОЕ: Добавим проверку для списков, чтобы можно было обращаться по индексу {{...[0]...}}
+            elif isinstance(current, list) and key.isdigit() and 0 <= int(key) < len(current):
+                current = current[int(key)]
+            else:
+                # Если путь не найден, возвращаем None, чтобы обработать это позже
+                return None
+        return current
+
+    # Паттерн для поиска {{ ... }} с пробелами
+    pattern = r"\{\{\s*(.+?)\s*\}\}"
+
+    def replacer(match):
+        path = match.group(1).strip()
+
+        # Убираем 'input.', если он есть (для обратной совместимости)
+        if path.startswith('input.'):
+            path = path[6:]
+
+        # Разделяем путь на первую часть (лейбл или ID) и остальное
+        parts = path.split('.', 1)
+        node_identifier = parts[0]
+        remaining_path = parts[1] if len(parts) > 1 else ''
+
+        # Определяем ID ноды
+        node_id = None
+        # 1. Сначала ищем по лейблу
+        if node_identifier in label_to_id_map:
+            node_id = label_to_id_map[node_identifier]
+        # 2. Если не нашли, ищем по ID (обратная совместимость)
+        elif node_identifier in data:
+            node_id = node_identifier
+        else:
+            logger.warning(f"⚠️ Шаблон: нода с лейблом или ID '{node_identifier}' не найдена.")
+            return f"{{{{ERROR: Node '{node_identifier}' not found}}}}"
+
+        # Собираем полный путь для поиска: 'node-id.remaining.path'
+        full_path = f"{node_id}.{remaining_path}" if remaining_path else node_id
+
+        value = get_nested_value(data, full_path)
+
+        # УЛУЧШЕНИЕ: Более надежная обработка разных типов данных
+        if value is None:
+            logger.warning(f"⚠️ Шаблон: путь '{path}' не найден в данных ноды '{node_identifier}'. Замена на пустую строку.")
+            return ""
         
-        def get_nested_value(obj: Dict[str, Any], path: str) -> Any:
-            """Получает значение по пути типа 'input.output.text'"""
-            keys = path.split('.')
-            current = obj
-            
-            for key in keys:
-                if isinstance(current, dict) and key in current:
-                    current = current[key]
-                else:
-                    return f"{{{{ {path} }}}}"  # Возвращаем исходный шаблон если путь не найден
-            
-            return str(current)
-        
-        # Находим все шаблоны вида {{что-то}}
-        pattern = r'\{\{([^}]+)\}\}'
-        
-        def replacer(match):
-            path = match.group(1).strip()
-            
-            # Если путь начинается с 'input.', убираем это
-            if path.startswith('input.'):
-                path = path[6:]  # Убираем 'input.'
-            
-            value = get_nested_value(data, path)
-            logger.info(f"🔄 Замена шаблона: {{{{{match.group(1)}}}}} -> {value}")
-            return value
-        
-        return re.sub(pattern, replacer, text)
+        # Если результат - словарь или список, возвращаем его как JSON
+        if isinstance(value, (dict, list)):
+            final_str = json.dumps(value, ensure_ascii=False)
+        else:
+            final_str = str(value)
+
+        logger.info(f"🔄 Замена шаблона: {{{{{match.group(1)}}}}} -> {final_str[:200]}...")
+        return final_str
+
+    return re.sub(pattern, replacer, text)
 
 # Add this helper function within the NodeExecutors class or globally if preferred
 # For simplicity, let's add it before the NodeExecutors class or as a static method
@@ -472,7 +526,7 @@ class NodeExecutors:
         self.gigachat_api = GigaChatAPI()
     
     
-    async def execute_request_iterator(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_request_iterator(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Выполнение Request Iterator ноды в соответствии с "Принципом Единого Результата".
         Использует явный шаблон для получения входных данных.
@@ -488,7 +542,7 @@ class NodeExecutors:
             raise Exception("Request Iterator: 'jsonInput' template is not configured in the node settings.")
 
         logger.info(f"📄 Input template for Request Iterator: {json_input_template}")
-        requests_to_make_json_str = replace_templates(json_input_template, input_data)
+        requests_to_make_json_str = replace_templates(json_input_template, input_data,label_to_id_map)
 
         # Проверка, что шаблон сработал и вернул непустую строку
         if not requests_to_make_json_str or requests_to_make_json_str == json_input_template:
@@ -617,7 +671,7 @@ class NodeExecutors:
         # --- 5. Финальный return по "Золотому Правилу" ---
         return node_result
 
-    async def execute_gigachat(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_gigachat(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение GigaChat ноды"""
         start_time = datetime.now()
         logger.info(f"Executing GigaChat node: {node.id}")
@@ -640,9 +694,9 @@ class NodeExecutors:
         if input_data:
             logger.info(f"📥 Входные данные от предыдущей ноды: {json.dumps(input_data, ensure_ascii=False, indent=2)[:500]}...")
             
-            user_message = replace_templates(original_user_message, input_data)
+            user_message = replace_templates(original_user_message, input_data,label_to_id_map)
             # Также заменяем шаблоны в system_message если есть
-            system_message = replace_templates(original_system_message, input_data)
+            system_message = replace_templates(original_system_message, input_data,label_to_id_map)
             
             if original_user_message != user_message:
                 logger.info(f"📝 Сообщение до замены: {original_user_message}")
@@ -716,7 +770,7 @@ class NodeExecutors:
         return node_result
 
 
-    async def execute_email(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_email(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение Email ноды"""
         config = node.data.get('config', {})
         to = config.get('to', '')
@@ -746,7 +800,7 @@ class NodeExecutors:
         }
         return email_result
 
-    async def execute_database(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_database(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение Database ноды"""
         config = node.data.get('config', {})
         query = config.get('query', '')
@@ -781,7 +835,7 @@ class NodeExecutors:
 
         return db_result
 
-    async def execute_webhook(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_webhook(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Выполнение Webhook ноды с новой структурой вывода и явным шаблоном для тела запроса.
         """
@@ -798,7 +852,7 @@ class NodeExecutors:
             # НОВОЕ: Получаем шаблон тела запроса
             body_template = config.get('bodyTemplate', '{}') 
 
-            url = replace_templates(url_template, input_data)
+            url = replace_templates(url_template, input_data,label_to_id_map)
             if not url:
                 raise Exception("Webhook: URL is required in the node settings.")
 
@@ -813,7 +867,7 @@ class NodeExecutors:
             payload = None
             if method in ['POST', 'PUT', 'PATCH']:
                 # Заполняем шаблон данными от предыдущих нод
-                resolved_body_str = replace_templates(body_template, input_data)
+                resolved_body_str = replace_templates(body_template, input_data,label_to_id_map)
                 try:
                     # Превращаем строку в Python объект (dict/list)
                     payload = json.loads(resolved_body_str)
@@ -879,7 +933,7 @@ class NodeExecutors:
         }
 
 
-    async def execute_timer(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_timer(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Выполнение Timer ноды как ПЕРВОГО ШАГА в workflow.
         Ее единственная задача - сгенерировать стартовые данные.
@@ -939,7 +993,7 @@ class NodeExecutors:
         return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-    async def execute_join(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_join(self, node: Node,label_to_id_map: Dict[str, str], input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Выполнение интеллектуальной Join/Merge ноды, которая находит общие данные,
         изолирует уникальные и формирует чистый результат.
@@ -1028,7 +1082,7 @@ class NodeExecutors:
         
         return final_result
 
-    async def execute_if_else(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_if_else(self, node: Node,label_to_id_map: Dict[str, str], input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение If/Else ноды"""
         start_time = time.time()
         config = node.data.get('config', {})
@@ -1137,7 +1191,7 @@ class NodeExecutors:
         }
 
     # НОВОЕ: Логика для ноды-диспетчера
-    async def execute_dispatcher(self, node: Node, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_dispatcher(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Агент-диспетчер, который анализирует запрос и выбирает нужный workflow"""
         logger.info(f"Executing Dispatcher node: {node.id}")
         config = node.data.get('config', {})
@@ -1290,7 +1344,7 @@ async def execute_node(
             raise HTTPException(status_code=400, detail=f"Unknown node type: {node_type}")
 
         # Выполняем ноду
-        result = await executor(node, input_data or {})
+        result = await executor(node, {},input_data or {})
         
         return ExecutionResult(
             success=True,
@@ -1684,6 +1738,20 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
     goto_execution_counter.clear()
 
     try:
+        # ======================= НАЧАЛО НОВОГО БЛОКА =======================
+        # Проверка на уникальность лейблов и создание карты 'label' -> 'id'
+        # Мы используем request.nodes, так как ноды приходят внутри объекта WorkflowExecuteRequest
+        labels = [node.data.get('label', node.id) for node in request.nodes] # Используем .get для безопасности
+        if len(labels) != len(set(labels)):
+            # Находим дубликат для более информативного сообщения
+            seen = set()
+            duplicates = {x for x in labels if x in seen or seen.add(x)}
+            raise ValueError(f"Ошибка: Обнаружены дублирующиеся лейблы нод: {', '.join(duplicates)}. Каждая нода должна иметь уникальное имя (label).")
+
+        # Создаем карту 'label' -> 'id'
+        label_to_id_map = {node.data.get('label', node.id): node.id for node in request.nodes}
+        # ======================== КОНЕЦ НОВОГО БЛОКА ========================
+
         logger.info(f"🚀 Запуск workflow с {len(request.nodes)} нодами")
         if initial_input_data:
             logger.info(f"💡 Workflow запущен с начальными данными: {json.dumps(initial_input_data, default=str, indent=2)[:300]}...")
@@ -1729,7 +1797,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
         # ИЗМЕНЕНО: Это теперь главный контейнер для ВСЕХ результатов
         workflow_results = {}
 
-        async def execute_node_recursive(node_id: str, source_node_id: str = None):
+        async def execute_node_recursive(node_id: str,label_to_id_map: Dict[str, str], source_node_id: str = None):
             node = next((n for n in request.nodes if n.id == node_id), None)
             if not node:
                 return
@@ -1757,7 +1825,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                 # Передаем управление следующим нодам
                 next_connections = [c for c in request.connections if c.source == node_id]
                 for connection in next_connections:
-                    await execute_node_recursive(connection.target, node_id)
+                    await execute_node_recursive(connection.target, label_to_id_map, node_id)
                 return
 
             # Проверка на join ноду
@@ -1811,7 +1879,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
             executor = executor_map.get(node.type)
             if executor:
                 # ИЗМЕНЕНО: Вызываем executor с подготовленными данными
-                node_result = await executor(node, current_input_data)
+                node_result = await executor(node, label_to_id_map,current_input_data)
 
                 # ИЗМЕНЕНО: Сохраняем ИЗОЛИРОВАННЫЙ результат ноды в общий контейнер
                 workflow_results[node_id] = node_result
@@ -1854,22 +1922,22 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
 
                             logger.info(f"🔄 Активирован goto переход к {goto_conn.target} (итерация {goto_execution_counter[goto_key]})")
                             # ИЗМЕНЕНО: Рекурсивный вызов без прямой передачи данных
-                            await execute_node_recursive(goto_conn.target, node_id)
+                            await execute_node_recursive(goto_conn.target, label_to_id_map,node_id,)
                         return # После goto не выполняем обычные соединения
 
                     for connection in filtered_connections:
                         # ИЗМЕНЕНО: Рекурсивный вызов без прямой передачи данных
-                        await execute_node_recursive(connection.target, node_id)
+                        await execute_node_recursive(connection.target,label_to_id_map, node_id)
                 else:
                     # Для всех остальных типов нод
                     for connection in next_connections:
                         # ИЗМЕНЕНО: Рекурсивный вызов без прямой передачи данных
-                        await execute_node_recursive(connection.target, node_id)
+                        await execute_node_recursive(connection.target, label_to_id_map,node_id)
             else:
                 raise Exception(f"Unknown node type: {node.type}")
 
         # Запускаем выполнение с самой первой ноды
-        await execute_node_recursive(start_node.id)
+        await execute_node_recursive(start_node.id,label_to_id_map)
 
         # ИЗМЕНЕНО: Возвращаем ВЕСЬ контейнер с результатами, а не последний результат
         return ExecutionResult(

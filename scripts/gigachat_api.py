@@ -139,7 +139,7 @@ def execute_gigachat_node(auth_token, system_message, user_message, clear_histor
 # Пример использования
 if __name__ == "__main__":
     # Тестовые данные
-    test_token = 'ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmJjZDE1MzAzLTdmNzUtNGY4MC04MWYzLTZiODU4NmRhYmQwMg=='
+    test_token = 'MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg=='
     test_system = "Ты полезный ассистент, который отвечает кратко и по делу."
     test_user = "Привет! Как дела?"
     
