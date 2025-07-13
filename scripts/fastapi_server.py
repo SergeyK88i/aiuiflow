@@ -93,6 +93,10 @@ class NodeConfig(BaseModel):
     routes: Optional[Dict[str, Any]] = None
     useAI: Optional[bool] = True
     dispatcherAuthToken: Optional[str] = None # Токен для GigaChat внутри диспетчера
+    dispatcher_type: Optional[str] = "router"  # "router" или "orchestrator"
+    enable_planning: Optional[bool] = False
+    available_workflows: Optional[Dict[str, Any]] = {}
+    session_storage: Optional[str] = "memory"
 
 class Node(BaseModel):
     id: str
@@ -371,19 +375,32 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
 # Замени свою старую функцию replace_templates на эту
 def replace_templates(text: str, data: Dict[str, Any], label_to_id_map: Dict[str, str]) -> str:
     """Универсальная замена шаблонов вида {{Node Label.path.to.value}} или {{node-id.path.to.value}}"""
+    
+    # ИМПОРТИРУЕМ МОДУЛЬ ДЛЯ РЕГУЛЯРНЫХ ВЫРАЖЕНИЙ
+    import re
 
     def get_nested_value(obj: Dict[str, Any], path: str) -> Any:
-        """Получает значение по пути типа 'node-id.output.text'"""
-        keys = path.split('.')
+        """Получает значение по пути типа 'node-id.output.text' или 'node-id.json.result[0].text'"""
+        
+        # Новый, более умный разборщик пути.
+        # Он разделяет по точкам и по квадратным скобкам, отбрасывая пустые элементы.
+        # Например, 'a.b[0]' превратится в ['a', 'b', '0']
+        keys = [key for key in re.split(r'[.\[\]]', path) if key]
+        
         current = obj
         for key in keys:
             if isinstance(current, dict) and key in current:
                 current = current[key]
-            # НОВОЕ: Добавим проверку для списков, чтобы можно было обращаться по индексу {{...[0]...}}
-            elif isinstance(current, list) and key.isdigit() and 0 <= int(key) < len(current):
-                current = current[int(key)]
+            # Теперь он правильно обработает индекс массива
+            elif isinstance(current, list) and key.isdigit():
+                index = int(key)
+                if 0 <= index < len(current):
+                    current = current[index]
+                else:
+                    # Индекс за пределами массива
+                    return None
             else:
-                # Если путь не найден, возвращаем None, чтобы обработать это позже
+                # Ключ или индекс не найден
                 return None
         return current
 
@@ -428,7 +445,16 @@ def replace_templates(text: str, data: Dict[str, Any], label_to_id_map: Dict[str
         if isinstance(value, (dict, list)):
             final_str = json.dumps(value, ensure_ascii=False)
         else:
-            final_str = str(value)
+            # Для всего остального (строки, числа, булевы) мы делаем трюк:
+            # 1. Превращаем значение в строку (на случай если это число).
+            # 2. Кодируем эту строку в JSON. Это автоматически экранирует все спецсимволы: \n, ", \ и т.д.
+            #    'a\nb' станет '"a\\nb"'
+            # 3. Убираем крайние кавычки, которые добавляет json.dumps.
+            #    '"a\\nb"' станет 'a\\nb'
+            # Это гарантирует, что вставленный текст будет безопасным для JSON.
+            final_str = json.dumps(str(value), ensure_ascii=False)
+            if final_str.startswith('"') and final_str.endswith('"'):
+                final_str = final_str[1:-1]
 
         logger.info(f"🔄 Замена шаблона: {{{{{match.group(1)}}}}} -> {final_str[:200]}...")
         return final_str
@@ -524,6 +550,10 @@ async def _make_single_http_request(
 class NodeExecutors:
     def __init__(self):
         self.gigachat_api = GigaChatAPI()
+
+        # ДОБАВИТЬ эти строки:
+        self.dispatcher_sessions = {}  # Хранилище сессий для всех диспетчеров
+        logger.info("🏗️ NodeExecutors инициализирован с поддержкой сессий диспетчеров")
     
     
     async def execute_request_iterator(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1191,19 +1221,45 @@ class NodeExecutors:
         }
 
     # НОВОЕ: Логика для ноды-диспетчера
-    async def execute_dispatcher(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Агент-диспетчер, который анализирует запрос и выбирает нужный workflow"""
-        logger.info(f"Executing Dispatcher node: {node.id}")
+    async def execute_dispatcher(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]):
+        """Выполняет диспетчер в режиме router или orchestrator"""
+        config = node.data.get('config', {})
+        dispatcher_type = config.get('dispatcher_type', 'router')
+        
+        logger.info(f"🎯 Executing dispatcher {node.id} in {dispatcher_type} mode")
+        
+        if dispatcher_type == 'router':
+            # Существующая логика - простой роутинг
+            return await self.execute_router_dispatcher(node, label_to_id_map, input_data)
+        
+        elif dispatcher_type == 'orchestrator':
+            # НОВАЯ логика - планирование и координация
+            return await self.execute_orchestrator_dispatcher(node, label_to_id_map, input_data)
+        
+        else:
+            raise Exception(f"Неизвестный тип диспетчера: {dispatcher_type}")
+    async def execute_router_dispatcher(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Агент-диспетчер, который анализирует запрос и выбирает нужный workflow (старая логика)"""
+        logger.info(f"DEBUG: input_data for dispatcher: {json.dumps(input_data, ensure_ascii=False, indent=2)}")
+
+        logger.info(f"🔀 Executing Router Dispatcher node: {node.id}")
         config = node.data.get('config', {})
         
-        # Получаем вопрос пользователя из разных возможных источников
-        user_query = ""
-        if input_data and 'output' in input_data and 'text' in input_data['output']:
-            user_query = input_data['output']['text']
-        elif input_data and 'user_query' in input_data:
-            user_query = input_data['user_query']
-        elif isinstance(input_data, dict): # Пытаемся найти ключ с запросом
-            user_query = input_data.get('query', input_data.get('text', ''))
+        # Новый блок: получаем шаблон из конфига или используем дефолтный
+        query_template = config.get('userQueryTemplate') or '{{ input.output.text }}'
+
+        # Для replace_templates нужен label_to_id_map, как в execute_workflow_internal
+        # Если label_to_id_map пустой, можно попытаться построить его из input_data:
+        if not label_to_id_map:
+            # Попробуем собрать из input_data (если это контейнер)
+            label_to_id_map = {}
+            for k, v in input_data.items():
+                if isinstance(v, dict) and 'label' in v:
+                    label_to_id_map[v['label']] = k
+
+        # Подставляем шаблон
+        user_query = replace_templates(query_template, input_data, label_to_id_map).strip()
+
 
         if not user_query:
             raise Exception("Dispatcher: User query not found in input data.")
@@ -1221,10 +1277,21 @@ class NodeExecutors:
             if not auth_token:
                 raise Exception("Dispatcher: GigaChat auth token is required for AI mode.")
 
-            classification_prompt = f"""Определи категорию запроса пользователя и выбери подходящий обработчик.
-            Доступные категории: {json.dumps(list(workflow_routes.keys()), ensure_ascii=False)}
-            Запрос пользователя: {user_query}
-            Ответь ТОЛЬКО одним словом - названием категории."""
+            # classification_prompt = f"""Определи категорию запроса пользователя и выбери подходящий обработчик.
+            # Доступные категории: {json.dumps(list(workflow_routes.keys()), ensure_ascii=False)}
+            # Запрос пользователя: {user_query}
+            # Ответь ТОЛЬКО одним словом - названием категории."""
+            # Новый блок: используем кастомный промпт, если он есть
+            dispatcher_prompt = config.get('dispatcherPrompt')
+            DEFAULT_PROMPT = (
+                "Определи категорию запроса пользователя и выбери подходящий обработчик.\n"
+                "Доступные категории: {категории}\n"
+                "Запрос пользователя: {запрос пользователя}\n"
+                "Ответь ТОЛЬКО одним словом - названием категории."
+            )
+            categories_str = ", ".join(workflow_routes.keys())
+            prompt_template = dispatcher_prompt or DEFAULT_PROMPT
+            classification_prompt = prompt_template.replace("{категории}", categories_str).replace("{запрос пользователя}", user_query)
             
             # Получаем токен и делаем запрос
             if await self.gigachat_api.get_token(auth_token):
@@ -1291,7 +1358,290 @@ class NodeExecutors:
                 "json": sub_workflow_result.result
             }
         }
-    
+    async def execute_orchestrator_dispatcher(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]):
+        """Планирующий диспетчер - создает план и координирует выполнение"""
+        config = node.data.get('config', {})
+        session_id = input_data.get('session_id')
+        dispatcher_id = node.id
+        
+        logger.info(f"🎼 Orchestrator dispatcher {dispatcher_id} processing request")
+        
+        # Инициализируем хранилище сессий для этого диспетчера
+        if dispatcher_id not in self.dispatcher_sessions:
+            self.dispatcher_sessions[dispatcher_id] = {}
+        
+        sessions = self.dispatcher_sessions[dispatcher_id]
+        
+        # 1. Если это возврат от workflow
+        if input_data.get('return_to_dispatcher'):
+            logger.info(f"📥 Handling workflow return for session {session_id}")
+            return await self.handle_workflow_return(dispatcher_id, sessions, input_data)
+        
+        # 2. Если продолжение существующей сессии
+        elif session_id and session_id in sessions:
+            logger.info(f"🔄 Continuing session {session_id}")
+            return await self.handle_session_continuation(dispatcher_id, sessions, input_data)
+        
+        # 3. Если новый запрос - создаем план
+        else:
+            logger.info(f"🆕 Creating new session for new request")
+            return await self.create_new_orchestrator_session(dispatcher_id, sessions, config, input_data)
+    async def create_new_orchestrator_session(self, dispatcher_id: str, sessions: Dict, config: Dict, input_data: Dict[str, Any]):
+        """Создает новую сессию и план выполнения"""
+        import uuid
+        from datetime import datetime
+        
+        session_id = str(uuid.uuid4())
+        user_query = input_data.get('user_query', input_data.get('message', ''))
+        
+        logger.info(f"📋 Creating execution plan for: {user_query}")
+        
+        # Создаем план через GigaChat
+        plan = await self.create_execution_plan(config, user_query)
+        
+        # Сохраняем сессию
+        sessions[session_id] = {
+            "plan": plan,
+            "current_step": 0,
+            "user_query": user_query,
+            "accumulated_data": {},
+            "created_at": datetime.now(),
+            "dispatcher_id": dispatcher_id
+        }
+        
+        logger.info(f"💾 Session {session_id} created with {len(plan)} steps")
+        
+        # Запускаем первый workflow
+        if plan:
+            first_step = plan[0]
+            workflow_id = first_step.get('workflow_id')
+            
+            if workflow_id:
+                workflow_input = {
+                    **input_data,
+                    "session_id": session_id,
+                    "dispatcher_context": {
+                        "plan": plan,
+                        "step": 0,
+                        "dispatcher_id": dispatcher_id
+                    }
+                }
+                
+                logger.info(f"🚀 Launching first workflow: {workflow_id}")
+                return await self.launch_workflow_by_id(workflow_id, workflow_input)
+            else:
+                raise Exception("Первый шаг плана не содержит workflow_id")
+        else:
+            raise Exception("Не удалось создать план выполнения")
+    async def create_execution_plan(self, config: Dict, user_query: str):
+        """Создает план выполнения через GigaChat"""
+        import json
+        
+        available_workflows = config.get('available_workflows', {})
+        auth_token = config.get('dispatcherAuthToken', '')
+        
+        if not auth_token:
+            raise Exception("Токен авторизации для планирующего диспетчера не указан")
+        
+        if not available_workflows:
+            raise Exception("Доступные workflow для планирования не указаны")
+        
+        # Формируем описание доступных workflow
+        workflows_description = "\n".join([
+            f"- {wf_id}: {wf_config.get('description', 'Описание отсутствует')}"
+            for wf_id, wf_config in available_workflows.items()
+        ])
+        
+        planning_prompt = f"""
+        Пользователь просит: "{user_query}"
+        
+        Доступные workflow для выполнения:
+        {workflows_description}
+        
+        Создай пошаговый план выполнения в формате JSON массива:
+        [
+            {{"workflow_id": "workflow1", "description": "что делает этот шаг"}},
+            {{"workflow_id": "workflow2", "description": "что делает этот шаг"}}
+        ]
+        
+        Правила:
+        1. Используй только workflow_id из списка выше
+        2. Создавай логичную последовательность шагов
+        3. Отвечай ТОЛЬКО JSON массивом, без дополнительного текста
+        4. Если задача простая, можно использовать один workflow
+        """
+        
+        if await self.gigachat_api.get_token(auth_token):
+            result = await self.gigachat_api.get_chat_completion(
+                "Ты планировщик задач. Анализируй запрос пользователя и создавай оптимальный план выполнения из доступных workflow.",
+                planning_prompt
+            )
+            
+            try:
+                # Пытаемся распарсить JSON
+                plan = json.loads(result['response'])
+                
+                # Валидируем план
+                if not isinstance(plan, list):
+                    raise ValueError("План должен быть массивом")
+                
+                for step in plan:
+                    if not isinstance(step, dict) or 'workflow_id' not in step:
+                        raise ValueError("Каждый шаг должен содержать workflow_id")
+                    
+                    if step['workflow_id'] not in available_workflows:
+                        raise ValueError(f"Workflow {step['workflow_id']} не найден в доступных")
+                
+                logger.info(f"📋 Создан план из {len(plan)} шагов: {[s['workflow_id'] for s in plan]}")
+                return plan
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"❌ Ошибка парсинга плана: {result['response']}")
+                logger.error(f"❌ Детали ошибки: {str(e)}")
+                
+                # Fallback к простому плану
+                fallback_workflows = list(available_workflows.keys())
+                if fallback_workflows:
+                    fallback_plan = [{"workflow_id": fallback_workflows[0], "description": "Fallback workflow"}]
+                    logger.info(f"🔄 Используем fallback план: {fallback_plan}")
+                    return fallback_plan
+                else:
+                    raise Exception("Не удалось создать план и нет доступных workflow для fallback")
+        
+        else:
+            raise Exception("Не удалось авторизоваться в GigaChat API для создания плана")
+    async def handle_workflow_return(self, dispatcher_id: str, sessions: Dict, input_data: Dict[str, Any]):
+        """Обрабатывает возврат от workflow"""
+        session_id = input_data.get('session_id')
+        
+        if not session_id or session_id not in sessions:
+            raise Exception(f"Сессия {session_id} не найдена в диспетчере {dispatcher_id}")
+        
+        session = sessions[session_id]
+        
+        # Сохраняем результат
+        workflow_result = input_data.get('workflow_result', {})
+        completed_workflow = input_data.get('completed_workflow', 'unknown')
+        
+        logger.info(f"📥 Workflow {completed_workflow} завершен для сессии {session_id}")
+        
+        # Добавляем результат к накопленным данным
+        session['accumulated_data'][f"step_{session['current_step']}_result"] = workflow_result
+        session['accumulated_data'][f"step_{session['current_step']}_workflow"] = completed_workflow
+        
+        # Переходим к следующему шагу
+        session['current_step'] += 1
+        
+        # Проверяем, есть ли еще шаги в плане
+        if session['current_step'] < len(session['plan']):
+            # Запускаем следующий workflow
+            next_step = session['plan'][session['current_step']]
+            next_workflow_id = next_step.get('workflow_id')
+            
+            logger.info(f"➡️ Переход к шагу {session['current_step']}: {next_workflow_id}")
+            
+            workflow_input = {
+                "session_id": session_id,
+                "user_query": session['user_query'],
+                "previous_results": session['accumulated_data'],
+                "dispatcher_context": {
+                    "plan": session['plan'],
+                    "step": session['current_step'],
+                    "dispatcher_id": dispatcher_id
+                }
+            }
+            
+            return await self.launch_workflow_by_id(next_workflow_id, workflow_input)
+        
+        else:
+            # План выполнен полностью
+            logger.info(f"✅ План для сессии {session_id} выполнен полностью")
+            
+            final_result = {
+                "success": True,
+                "message": "План выполнен успешно",
+                "session_id": session_id,
+                "completed_steps": len(session['plan']),
+                "results": session['accumulated_data'],
+                "session_completed": True,
+                "output": {
+                    "text": f"Выполнен план из {len(session['plan'])} шагов",
+                    "json": session['accumulated_data']
+                }
+            }
+            
+            # Удаляем завершенную сессию
+            del sessions[session_id]
+            logger.info(f"🗑️ Сессия {session_id} удалена")
+            
+            return final_result
+    async def handle_session_continuation(self, dispatcher_id: str, sessions: Dict, input_data: Dict[str, Any]):
+        """Обрабатывает продолжение существующей сессии (новый запрос пользователя)"""
+        session_id = input_data.get('session_id')
+        session = sessions[session_id]
+        
+        user_query = input_data.get('user_query', input_data.get('message', ''))
+        
+        logger.info(f"🔄 Продолжение сессии {session_id}: {user_query}")
+        
+        # Добавляем новый запрос к сессии
+        if 'additional_requests' not in session:
+            session['additional_requests'] = []
+        
+        session['additional_requests'].append({
+            "query": user_query,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Пока что просто возвращаем информацию о текущем состоянии
+        # В будущем можно добавить логику для модификации плана
+        current_step = session['current_step']
+        total_steps = len(session['plan'])
+        
+        return {
+            "success": True,
+            "message": f"Запрос добавлен к существующей сессии. Выполняется шаг {current_step + 1} из {total_steps}",
+            "session_id": session_id,
+            "current_step": current_step,
+            "total_steps": total_steps,
+            "additional_request_added": True,
+            "output": {
+                "text": f"Ваш запрос принят. Сейчас выполняется шаг {current_step + 1} из {total_steps}",
+                "json": {
+                    "session_status": "active",
+                    "progress": f"{current_step}/{total_steps}"
+                }
+            }
+        }
+    async def launch_workflow_by_id(self, workflow_id: str, input_data: Dict[str, Any]):
+        """Запускает workflow по ID"""
+        if workflow_id not in saved_workflows:
+            raise Exception(f"Workflow {workflow_id} не найден в сохраненных workflow")
+        
+        workflow_data = saved_workflows[workflow_id]
+        
+        logger.info(f"🚀 Запуск workflow {workflow_id}")
+        
+        workflow_request = WorkflowExecuteRequest(
+            nodes=workflow_data["nodes"],
+            connections=workflow_data["connections"]
+        )
+        
+        # Запускаем workflow с переданными данными
+        result = await execute_workflow_internal(workflow_request, initial_input_data=input_data)
+        
+        return {
+            "success": result.success,
+            "workflow_id": workflow_id,
+            "result": result.result,
+            "error": result.error,
+            "logs": result.logs,
+            "output": {
+                "text": f"Workflow {workflow_id} {'выполнен успешно' if result.success else 'завершился с ошибкой'}",
+                "json": result.result
+            }
+        }
+
 # Глобальный экземпляр исполнителей
 executors = NodeExecutors()
 
@@ -2165,6 +2515,44 @@ async def execute_timer_now(timer_id: str):
     except Exception as e:
         logger.error(f"❌ Ошибка при немедленном выполнении таймера {timer_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/dispatcher/{dispatcher_id}/sessions")
+async def get_dispatcher_sessions(dispatcher_id: str):
+    """Получить активные сессии конкретного диспетчера"""
+    if dispatcher_id not in executors.dispatcher_sessions:
+        return {"sessions": []}
+    
+    sessions = executors.dispatcher_sessions[dispatcher_id]
+    
+    sessions_info = []
+    for session_id, session_data in sessions.items():
+        sessions_info.append({
+            "session_id": session_id,
+            "current_step": session_data.get('current_step', 0),
+            "total_steps": len(session_data.get('plan', [])),
+            "user_query": session_data.get('user_query', ''),
+            "created_at": session_data.get('created_at', '').isoformat() if session_data.get('created_at') else '',
+            "plan": session_data.get('plan', [])
+        })
+    
+    return {"sessions": sessions_info}
+
+@app.delete("/dispatcher/{dispatcher_id}/sessions/{session_id}")
+async def delete_dispatcher_session(dispatcher_id: str, session_id: str):
+    """Удалить конкретную сессию диспетчера"""
+    if dispatcher_id not in executors.dispatcher_sessions:
+        raise HTTPException(status_code=404, detail="Диспетчер не найден")
+    
+    sessions = executors.dispatcher_sessions[dispatcher_id]
+    
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    
+    del sessions[session_id]
+    logger.info(f"🗑️ Сессия {session_id} диспетчера {dispatcher_id} удалена")
+    
+    return {"message": f"Сессия {session_id} удалена"}
+
 
 # Обработчик запуска сервера
 @app.on_event("startup")

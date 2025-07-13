@@ -40,6 +40,7 @@ import { GitMerge } from "lucide-react" // Добавьте к существу�
 import * as api from './api';
 import { WorkflowManagerModal } from "@/WorkflowManagerModal"
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Checkbox } from "./components/ui/checkbox"
 
 /**
  * Проверяет, является ли potentialAncestorId предком для nodeId в графе.
@@ -2336,120 +2337,223 @@ useEffect(() => {
                   {/*     НАЧАЛО БЛОКА ДЛЯ НОДЫ "ДИСПЕТЧЕР"     */}
                   {/********************************************/}
                   {selectedNode.type === "dispatcher" && (() => {
-                      // Получаем текущие маршруты из конфига ноды
-                      const routes = selectedNode.data.config?.routes || {};
-                      const routeEntries = Object.entries(routes);
+  // Получаем маршруты из конфига
+  const routes = selectedNode.data.config?.routes || {};
+  const routeEntries = Object.entries(routes);
 
-                      // Функция для обновления конкретного поля в маршруте
-                      const handleRouteConfigChange = (category, field, value) => {
-                        const newRoutes = { ...routes };
-                        if (!newRoutes[category]) newRoutes[category] = {};
-                        newRoutes[category][field] = value;
-                        updateNodeConfig('routes', newRoutes);
-                      };
-                      
-                      // Функция для переименования категории маршрута
-                      const handleCategoryChange = (oldCategory, newCategory) => {
-                        if (oldCategory === newCategory || !newCategory.trim() || routes[newCategory]) return;
-                        const newRoutes = { ...routes };
-                        newRoutes[newCategory] = newRoutes[oldCategory];
-                        delete newRoutes[oldCategory];
-                        updateNodeConfig('routes', newRoutes);
-                      };
+  // Типы диспетчера
+  const dispatcherTypes = [
+    { value: "router", label: "Маршрутизатор" },
+    { value: "orchestrator", label: "Оркестратор" },
+  ];
 
-                      // Функция для добавления нового пустого маршрута
-                      const handleAddRoute = () => {
-                        const newCategory = `Новый маршрут ${Object.keys(routes).length + 1}`;
-                        const newRoutes = { ...routes, [newCategory]: { workflow_id: '', keywords: [] } };
-                        updateNodeConfig('routes', newRoutes);
-                      };
+  // Функции для работы с маршрутами
+  const handleRouteConfigChange = (category, field, value) => {
+    const newRoutes = { ...routes };
+    if (!newRoutes[category]) newRoutes[category] = {};
+    newRoutes[category][field] = value;
+    updateNodeConfig('routes', newRoutes);
+  };
 
-                      // Функция для удаления маршрута
-                      const handleDeleteRoute = (category) => {
-                        const newRoutes = { ...routes };
-                        delete newRoutes[category];
-                        updateNodeConfig('routes', newRoutes);
-                      };
+  const handleCategoryChange = (oldCategory, newCategory) => {
+    if (oldCategory === newCategory || !newCategory.trim() || routes[newCategory]) return;
+    const newRoutes = { ...routes };
+    newRoutes[newCategory] = newRoutes[oldCategory];
+    delete newRoutes[oldCategory];
+    updateNodeConfig('routes', newRoutes);
+  };
 
-                      return (
-                        <>
-                          
-                          <div className="p-4 space-y-4">
-                            <h3 className="text-lg font-semibold">Настройки Диспетчера</h3>
-                            <div className="flex items-center space-x-2">
-                                <Switch
-                                    id="use-ai-switch"
-                                    checked={selectedNode.data.config?.useAI || false}
-                                    onCheckedChange={(checked) => updateNodeConfig('useAI', checked)}
-                                />
-                                <Label htmlFor="use-ai-switch">Использовать AI для маршрутизации</Label>
-                            </div>
-                            {selectedNode.data.config?.useAI && (
-                                <div>
-                                    <Label>Токен GigaChat для диспетчера</Label>
-                                    <Input
-                                        type="password"
-                                        placeholder="Введите токен..."
-                                        value={selectedNode.data.config?.dispatcherAuthToken || ''}
-                                        onChange={(e) => updateNodeConfig('dispatcherAuthToken', e.target.value)}
-                                    />
-                                </div>
-                            )}
+  const handleAddRoute = () => {
+    const newCategory = `Новый маршрут ${Object.keys(routes).length + 1}`;
+    const newRoutes = { ...routes, [newCategory]: { workflow_id: '', keywords: [] } };
+    updateNodeConfig('routes', newRoutes);
+  };
 
-                            <h4 className="text-md font-semibold border-t pt-4">Маршруты</h4>
-                            <ScrollArea className="h-[350px] w-full">
-                              <div className="space-y-3 pr-4">
-                                {routeEntries.map(([category, config]) => (
-                                  <div key={category} className="p-3 border rounded-lg bg-card">
-                                    <div className="flex justify-between items-center mb-3">
-                                      <Input 
-                                        defaultValue={category}
-                                        className="font-semibold text-md h-8 border-0 shadow-none focus-visible:ring-1"
-                                        onBlur={(e) => handleCategoryChange(category, e.target.value)}
-                                      />
-                                      <Button variant="ghost" size="icon" onClick={() => handleDeleteRoute(category)}>
-                                        <Trash2 className="h-4 w-4 text-destructive" />
-                                      </Button>
-                                    </div>
-                                    <div className="space-y-3">
-                                      <div>
-                                        <Label>Вызываемый Workflow</Label>
-                                        <Select
-                                          value={config.workflow_id || ''}
-                                          onValueChange={(value) => handleRouteConfigChange(category, 'workflow_id', value)}
-                                        >
-                                          <SelectTrigger>
-                                            <SelectValue placeholder="Выберите workflow..." />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {workflows.map(wf => (
-                                              <SelectItem key={wf.id} value={wf.id}>{wf.name}</SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                      {!selectedNode.data.config?.useAI && (
-                                        <div>
-                                          <Label>Ключевые слова (через запятую)</Label>
-                                          <Input
-                                            placeholder="заказ, статус, купить..."
-                                            value={(config.keywords || []).join(', ')}
-                                            onChange={(e) => handleRouteConfigChange(category, 'keywords', e.target.value.split(',').map(k => k.trim()))}
-                                          />
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </ScrollArea>
-                            <Button onClick={handleAddRoute} className="mt-2 w-full">
-                              Добавить маршрут
-                            </Button>
-                          </div>
-                        </>
-                      );
-                  })()}
+  const handleDeleteRoute = (category) => {
+    const newRoutes = { ...routes };
+    delete newRoutes[category];
+    updateNodeConfig('routes', newRoutes);
+  };
+
+  // Проверяем режим
+  const isOrchestrator = selectedNode.data.config.dispatcherType === "orchestrator";
+
+  return (
+    <div className="p-4 space-y-4">
+      <h3 className="text-lg font-semibold">Настройки Диспетчера</h3>
+
+      {/* Выбор типа диспетчера */}
+      <div>
+        <Label htmlFor="dispatcherType">Тип диспетчера</Label>
+        <Select
+          value={selectedNode.data.config.dispatcherType || "router"}
+          onValueChange={(value) => updateNodeConfig("dispatcherType", value)}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Выберите тип" />
+          </SelectTrigger>
+          <SelectContent>
+            {dispatcherTypes.map((type) => (
+              <SelectItem key={type.value} value={type.value}>
+                {type.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+  <Label htmlFor="userQueryTemplate" className="mb-1 block">
+    Шаблон для поиска пользовательского запроса
+  </Label>
+  <Input
+    id="userQueryTemplate"
+    placeholder="Например: {{ Webhook Trigger.output.text }}"
+    value={selectedNode.data.config.userQueryTemplate || ''}
+    onChange={e => updateNodeConfig('userQueryTemplate', e.target.value)}
+    className="mb-2"
+  />
+  <div className="text-xs text-muted-foreground">
+    Используйте <code>{'{{ label_ноды.output.text }}'}</code> или <code>{'{{ node-id.output.text }}'}</code>
+  </div>
+</div>
+
+
+      {/* Настройки для router */}
+      {!isOrchestrator && (
+        <>
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="use-ai-switch"
+              checked={selectedNode.data.config?.useAI || false}
+              onCheckedChange={(checked) => updateNodeConfig('useAI', checked)}
+            />
+            <Label htmlFor="use-ai-switch">Использовать AI для маршрутизации</Label>
+          </div>
+          {selectedNode.data.config?.useAI && (
+            <div>
+              <Label>Токен GigaChat для диспетчера</Label>
+              <Input
+                type="password"
+                placeholder="Введите токен..."
+                value={selectedNode.data.config?.dispatcherAuthToken || ''}
+                onChange={(e) => updateNodeConfig('dispatcherAuthToken', e.target.value)}
+              />
+              <div className="mt-4">
+              <Label htmlFor="dispatcherPrompt">Промпт для AI маршрутизации</Label>
+              <Textarea
+                id="dispatcherPrompt"
+                placeholder="Определи категорию запроса пользователя и выбери подходящий обработчик..."
+                value={selectedNode.data.config?.dispatcherPrompt || ''}
+                onChange={e => updateNodeConfig('dispatcherPrompt', e.target.value)}
+                rows={5}
+                className="mt-1"
+              />
+              <div className="text-xs text-muted-foreground mt-1">
+                Здесь вы можете задать собственную инструкцию для GigaChat.<br />
+                Используйте <code>{'{категории}'}</code> и <code>{'{запрос пользователя}'}</code> для подстановки.
+              </div>
+            </div>
+            </div>
+          )}
+          <h4 className="text-md font-semibold border-t pt-4">Маршруты</h4>
+          <ScrollArea className="h-[350px] w-full">
+            <div className="space-y-3 pr-4">
+              {routeEntries.map(([category, config]) => (
+                <div key={category} className="p-3 border rounded-lg bg-card">
+                  <div className="flex justify-between items-center mb-3">
+                    <Input
+                      defaultValue={category}
+                      className="font-semibold text-md h-8 border-0 shadow-none focus-visible:ring-1"
+                      onBlur={(e) => handleCategoryChange(category, e.target.value)}
+                    />
+                    <Button variant="ghost" size="icon" onClick={() => handleDeleteRoute(category)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Вызываемый Workflow</Label>
+                      <Select
+                        value={config.workflow_id || ''}
+                        onValueChange={(value) => handleRouteConfigChange(category, 'workflow_id', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Выберите workflow..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {workflows.map(wf => (
+                            <SelectItem key={wf.id} value={wf.id}>
+                              {wf.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {!selectedNode.data.config?.useAI && (
+                      <div>
+                        <Label>Ключевые слова (через запятую)</Label>
+                        <Input
+                          placeholder="заказ, статус, купить..."
+                          value={(config.keywords || []).join(', ')}
+                          onChange={(e) =>
+                            handleRouteConfigChange(category, 'keywords', e.target.value.split(',').map(k => k.trim()))
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+          <Button onClick={handleAddRoute} className="mt-2 w-full">
+            Добавить маршрут
+          </Button>
+        </>
+      )}
+
+      {/* Настройки для orchestrator */}
+      {isOrchestrator && (
+  <div>
+    <Label htmlFor="availableWorkflows" className="mb-2 block text-base font-medium">
+      Доступные Workflow для Оркестратора
+    </Label>
+    <div className="flex flex-col gap-2">
+      {workflows.map((wf) => (
+        <label
+          key={wf.id}
+          htmlFor={`workflow-${wf.id}`}
+          className="flex items-center gap-2 p-2 rounded hover:bg-muted transition"
+        >
+          <Checkbox
+            id={`workflow-${wf.id}`}
+            checked={
+              !!(
+                selectedNode.data.config.availableWorkflows &&
+                selectedNode.data.config.availableWorkflows[wf.id] !== undefined
+              )
+            }
+            onCheckedChange={(checked) => {
+              const newAvailableWorkflows = { ...selectedNode.data.config.availableWorkflows };
+              if (checked) {
+                newAvailableWorkflows[wf.id] = { description: wf.name };
+              } else {
+                delete newAvailableWorkflows[wf.id];
+              }
+              updateNodeConfig("availableWorkflows", newAvailableWorkflows);
+            }}
+          />
+          <span className="text-base">{wf.name}</span>
+        </label>
+      ))}
+    </div>
+  </div>
+)}
+
+    </div>
+  );
+})()}
+
                   {/********************************************/}
                   {/*      КОНЕЦ БЛОКА ДЛЯ НОДЫ "ДИСПЕТЧЕР"      */}
                   {/********************************************/}
