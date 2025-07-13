@@ -146,17 +146,28 @@
                                 "workflow_id": "test_gigachat2",
                                 "keywords": [
                                     "музыка"
-                                ]
+                                ],
+                                "description": "все что связано с музыкой"
                             },
                             "coding": {
                                 "workflow_id": "test_gigachat",
                                 "keywords": [
                                     "программирование"
-                                ]
+                                ],
+                                "description": "все что связано с программированием"
                             }
                         },
                         "userQueryTemplate": "{{ node-1750708980650.output.query }}",
-                        "dispatcherPrompt": "Ты — умный маршрутизатор. Категории: {категории}. Запрос: {запрос пользователя}. Ответь категорией.\n"
+                        "dispatcherPrompt": "Ты — умный маршрутизатор. Категории: {категории}. Запрос: {запрос пользователя}. Ответь категорией.\n",
+                        "dispatcherType": "router",
+                        "availableWorkflows": {
+                            "test_gigachat": {
+                                "description": "test_gigachat"
+                            },
+                            "test_gigachat2": {
+                                "description": "test_gigachat2"
+                            }
+                        }
                     }
                 }
             },
@@ -173,8 +184,8 @@
                         "url": "https://api.example.com/webhook",
                         "method": "POST",
                         "headers": "Content-Type: application/json",
-                        "webhookId": "5647a938-92b1-433d-ba7a-41850af51639",
-                        "webhookUrl": "http://localhost:8000/webhooks/5647a938-92b1-433d-ba7a-41850af51639"
+                        "webhookId": "1bd3fbd0-7d23-4106-b4f0-03afe45f446c",
+                        "webhookUrl": "http://localhost:8000/webhooks/1bd3fbd0-7d23-4106-b4f0-03afe45f446c"
                     }
                 }
             }
@@ -188,7 +199,7 @@
             }
         ],
         "created_at": "2025-06-23T21:15:20.064651",
-        "updated_at": "2025-07-13T13:17:27.379735"
+        "updated_at": "2025-07-13T17:23:44.233318"
     },
     "timer_test_workflow": {
         "name": "Timer Test Workflow",

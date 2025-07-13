@@ -2499,7 +2499,16 @@ useEffect(() => {
                             handleRouteConfigChange(category, 'keywords', e.target.value.split(',').map(k => k.trim()))
                           }
                         />
+                        <Label>Описание категории</Label>
+  <Textarea
+    placeholder="Например: Всё, что связано с музыкой, инструментами, песнями..."
+    value={config.description || ''}
+    onChange={e => handleRouteConfigChange(category, 'description', e.target.value)}
+    rows={2}
+    className="mt-1"
+  />
                       </div>
+                      
                     )}
                   </div>
                 </div>

@@ -1224,7 +1224,9 @@ class NodeExecutors:
     async def execute_dispatcher(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]):
         """Выполняет диспетчер в режиме router или orchestrator"""
         config = node.data.get('config', {})
-        dispatcher_type = config.get('dispatcher_type', 'router')
+        # dispatcher_type = config.get('dispatcher_type', 'router')
+        dispatcher_type = config.get('dispatcher_type') or config.get('dispatcherType', 'router')
+
         
         logger.info(f"🎯 Executing dispatcher {node.id} in {dispatcher_type} mode")
         
@@ -1289,10 +1291,22 @@ class NodeExecutors:
                 "Запрос пользователя: {запрос пользователя}\n"
                 "Ответь ТОЛЬКО одним словом - названием категории."
             )
-            categories_str = ", ".join(workflow_routes.keys())
+            categories_desc = []
+            for name, info in workflow_routes.items():
+                desc = info.get("description", "")
+                keywords = ", ".join(info.get("keywords", []))
+                part = f"{name}"
+                if desc:
+                    part += f" — {desc}"
+                if keywords:
+                    part += f" (ключевые слова: {keywords})"
+                categories_desc.append(part)
+            # categories_str = ", ".join(workflow_routes.keys())
+            categories_str = "; ".join(categories_desc)
             prompt_template = dispatcher_prompt or DEFAULT_PROMPT
             classification_prompt = prompt_template.replace("{категории}", categories_str).replace("{запрос пользователя}", user_query)
-            
+            logger.info(f"AI classification prompt:\n{classification_prompt}")
+
             # Получаем токен и делаем запрос
             if await self.gigachat_api.get_token(auth_token):
                 gigachat_result = await self.gigachat_api.get_chat_completion(
@@ -1385,20 +1399,46 @@ class NodeExecutors:
         # 3. Если новый запрос - создаем план
         else:
             logger.info(f"🆕 Creating new session for new request")
-            return await self.create_new_orchestrator_session(dispatcher_id, sessions, config, input_data)
-    async def create_new_orchestrator_session(self, dispatcher_id: str, sessions: Dict, config: Dict, input_data: Dict[str, Any]):
+            return await self.create_new_orchestrator_session(dispatcher_id, sessions, config, input_data,label_to_id_map)
+    async def create_new_orchestrator_session(self, dispatcher_id: str, sessions: Dict, config: Dict, input_data: Dict[str, Any],label_to_id_map=None):
         """Создает новую сессию и план выполнения"""
         import uuid
         from datetime import datetime
         
         session_id = str(uuid.uuid4())
-        user_query = input_data.get('user_query', input_data.get('message', ''))
+        # user_query = input_data.get('user_query', input_data.get('message', ''))
         
+        # logger.info(f"📋 Creating execution plan for: {user_query}")
+        
+        # # Создаем план через GigaChat
+        # plan = await self.create_execution_plan(config, user_query)
+        # --- Новый блок: шаблон для user_query ---
+        # 1. Получаем шаблон из конфига или дефолтный
+        query_template = config.get('userQueryTemplate') or '{{ input.query }}'
+
+        # 2. Если label_to_id_map пустой, пробуем собрать из input_data
+        if not label_to_id_map:
+            label_to_id_map = {}
+            for k, v in input_data.items():
+                if isinstance(v, dict) and 'label' in v:
+                    label_to_id_map[v['label']] = k
+
+        # 3. Подставляем шаблон
+        user_query = replace_templates(query_template, input_data, label_to_id_map).strip()
+
+        # 4. Если не получилось — fallback к простому поиску
+        if not user_query:
+            user_query = (
+                input_data.get('user_query')
+                or input_data.get('message')
+                or input_data.get('query')
+                or input_data.get('text', '')
+            )
+
         logger.info(f"📋 Creating execution plan for: {user_query}")
-        
+
         # Создаем план через GigaChat
         plan = await self.create_execution_plan(config, user_query)
-        
         # Сохраняем сессию
         sessions[session_id] = {
             "plan": plan,
@@ -1437,7 +1477,11 @@ class NodeExecutors:
         """Создает план выполнения через GigaChat"""
         import json
         
-        available_workflows = config.get('available_workflows', {})
+        # available_workflows = config.get('available_workflows', {})
+        available_workflows = (
+            config.get('available_workflows')
+            or config.get('availableWorkflows', {})
+        )
         auth_token = config.get('dispatcherAuthToken', '')
         
         if not auth_token:
@@ -1449,8 +1493,10 @@ class NodeExecutors:
         # Формируем описание доступных workflow
         workflows_description = "\n".join([
             f"- {wf_id}: {wf_config.get('description', 'Описание отсутствует')}"
+            + (f" (ключевые слова: {', '.join(wf_config.get('keywords', []))})" if wf_config.get('keywords') else "")
             for wf_id, wf_config in available_workflows.items()
         ])
+
         
         planning_prompt = f"""
         Пользователь просит: "{user_query}"
@@ -1470,7 +1516,8 @@ class NodeExecutors:
         3. Отвечай ТОЛЬКО JSON массивом, без дополнительного текста
         4. Если задача простая, можно использовать один workflow
         """
-        
+        logger.info(f"Orchestrator planning prompt:\n{planning_prompt}")
+
         if await self.gigachat_api.get_token(auth_token):
             result = await self.gigachat_api.get_chat_completion(
                 "Ты планировщик задач. Анализируй запрос пользователя и создавай оптимальный план выполнения из доступных workflow.",
