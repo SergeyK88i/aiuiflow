@@ -1308,7 +1308,8 @@
                     "label": "Loop",
                     "config": {
                         "inputArrayPath": "node-1753565785314.json",
-                        "subWorkflowId": "test_gigachat2"
+                        "subWorkflowId": "test_gigachat2",
+                        "batchSize": 0
                     }
                 }
             }
@@ -1322,6 +1323,6 @@
             }
         ],
         "created_at": "2025-07-27T00:43:02.820809",
-        "updated_at": "2025-07-27T13:00:09.177763"
+        "updated_at": "2025-07-27T20:41:32.718125"
     }
 }

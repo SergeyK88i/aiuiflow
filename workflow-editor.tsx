@@ -1022,7 +1022,17 @@ useEffect(() => {
         useAI: false,
         dispatcherAuthToken: '',
         routes: {}
+      },
+      loop: {
+        inputArrayPath: "items",           // стандартный путь к массиву
+        subWorkflowId: "",                 // пусть будет пусто, чтобы пользователь выбрал
+        executionMode: "sequential",       // по умолчанию последовательный режим
+        maxConcurrent: 5,                  // для параллельного режима
+        batchSize: 0,                      // без batching по умолчанию
+        timeout: 300,                      // 5 минут на выполнение
+        skipErrors: true                   // продолжать при ошибках
       }
+      
     }
 
     const newNode: Node = {
@@ -1812,37 +1822,161 @@ useEffect(() => {
                   {selectedNode.type === "loop" && (
   <>
     <div>
-      <label>Путь к массиву</label>
-      <input
+      <Label htmlFor="inputArrayPath">Путь к массиву</Label>
+      <Input
+        id="inputArrayPath"
         value={selectedNode.data.config.inputArrayPath || ""}
         onChange={e => updateNodeConfig("inputArrayPath", e.target.value)}
-        placeholder="users"
+        placeholder="node-id.json или label.json"
       />
+      <p className="text-xs text-gray-500 mt-1">
+        Укажите путь к массиву данных, например: <code>gigachat.json</code> или <code>node-123.json</code>
+      </p>
     </div>
-    <div>
-      <label>Sub-workflow</label>
-      <select
+    
+    <div className="mt-4">
+      <Label htmlFor="subWorkflowId">Подпроцесс (Sub-workflow)</Label>
+      <Select
         value={selectedNode.data.config.subWorkflowId || ""}
-        onChange={e => updateNodeConfig("subWorkflowId", e.target.value)}
+        onValueChange={value => updateNodeConfig("subWorkflowId", value)}
       >
-        <option value="">Выберите workflow...</option>
-        {workflows.map(wf => (
-          <option key={wf.id} value={wf.id}>{wf.name}</option>
-        ))}
-      </select>
+        <SelectTrigger id="subWorkflowId">
+          <SelectValue placeholder="Выберите workflow..." />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="placeholder">Выберите workflow...</SelectItem>
+          {workflows.map(wf => (
+            <SelectItem key={wf.id} value={wf.id}>{wf.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-gray-500 mt-1">
+        Workflow, который будет выполнен для каждого элемента массива
+      </p>
     </div>
-    <div>
-      <label>Режим выполнения</label>
-      <select
+    
+    <div className="mt-4">
+      <Label htmlFor="executionMode">Режим выполнения</Label>
+      <Select
         value={selectedNode.data.config.executionMode || "sequential"}
-        onChange={e => updateNodeConfig("executionMode", e.target.value)}
+        onValueChange={value => updateNodeConfig("executionMode", value)}
       >
-        <option value="sequential">Последовательно</option>
-        <option value="parallel">Параллельно</option>
-      </select>
+        <SelectTrigger id="executionMode">
+          <SelectValue placeholder="Выберите режим" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="sequential">Последовательно</SelectItem>
+          <SelectItem value="parallel">Параллельно</SelectItem>
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-gray-500 mt-1">
+        Последовательно: элементы обрабатываются один за другим<br />
+        Параллельно: элементы обрабатываются одновременно
+      </p>
     </div>
+    
+    {/* НОВЫЕ НАСТРОЙКИ */}
+    
+    {/* Максимум параллельных процессов */}
+    {selectedNode.data.config.executionMode === "parallel" && (
+      <div className="mt-4">
+        <Label htmlFor="maxConcurrent">Максимум параллельных процессов</Label>
+        <Input
+          id="maxConcurrent"
+          type="number"
+          min="1"
+          max="20"
+          value={selectedNode.data.config.maxConcurrent || 5}
+          onChange={e => updateNodeConfig("maxConcurrent", parseInt(e.target.value) || 5)}
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Ограничивает количество одновременно выполняемых задач (1-20)
+        </p>
+      </div>
+    )}
+    
+    {/* Пакетная обработка */}
+    <div className="mt-4">
+      <div className="flex items-center space-x-2">
+        <Switch
+          id="enableBatching"
+          checked={!!selectedNode.data.config.batchSize}
+          onCheckedChange={checked => {
+            updateNodeConfig("batchSize", checked ? 10 : 0);
+          }}
+        />
+        <Label htmlFor="enableBatching">Включить пакетную обработку</Label>
+      </div>
+      <p className="text-xs text-gray-500 mt-1">
+        Обрабатывать большие массивы по частям для экономии ресурсов
+      </p>
+    </div>
+    
+    {/* Размер пакета */}
+    {selectedNode.data.config.batchSize > 0 && (
+      <div className="mt-2">
+        <Label htmlFor="batchSize">Размер пакета</Label>
+        <Input
+          id="batchSize"
+          type="number"
+          min="1"
+          max="100"
+          value={selectedNode.data.config.batchSize || 10}
+          onChange={e => updateNodeConfig("batchSize", parseInt(e.target.value) || 10)}
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Количество элементов, обрабатываемых за один раз
+        </p>
+      </div>
+    )}
+    
+    {/* Таймаут */}
+    <div className="mt-4">
+      <Label htmlFor="timeout">Таймаут (секунды)</Label>
+      <Input
+        id="timeout"
+        type="number"
+        min="10"
+        max="3600"
+        value={selectedNode.data.config.timeout || 300}
+        onChange={e => updateNodeConfig("timeout", parseInt(e.target.value) || 300)}
+      />
+      <p className="text-xs text-gray-500 mt-1">
+        Максимальное время выполнения для каждого элемента (10-3600 сек)
+      </p>
+    </div>
+    
+    {/* Пропускать ошибки */}
+    <div className="mt-4">
+      <div className="flex items-center space-x-2">
+        <Switch
+          id="skipErrors"
+          checked={selectedNode.data.config.skipErrors !== false}
+          onCheckedChange={checked => updateNodeConfig("skipErrors", checked)}
+        />
+        <Label htmlFor="skipErrors">Продолжать при ошибках</Label>
+      </div>
+      <p className="text-xs text-gray-500 mt-1">
+        Если включено, обработка продолжится даже при ошибках в отдельных элементах
+      </p>
+    </div>
+    
+    {/* Информационная панель */}
+    <Alert className="mt-6">
+      <Info className="h-4 w-4" />
+      <AlertDescription className="text-xs">
+        <p className="font-medium mb-1">Как использовать Loop:</p>
+        <ol className="list-decimal pl-4 space-y-1">
+          <li>Укажите путь к массиву данных (например, <code>gigachat.json</code>)</li>
+          <li>Выберите workflow, который будет запущен для каждого элемента</li>
+          <li>В подпроцессе используйте <code>{"{{item}}"}</code> для доступа к текущему элементу</li>
+          <li>Используйте <code>{"{{loop_index}}"}</code> для доступа к индексу элемента</li>
+        </ol>
+      </AlertDescription>
+    </Alert>
   </>
 )}
+
 
                   {selectedNode.type === "webhook" && (
                     <>

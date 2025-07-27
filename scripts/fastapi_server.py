@@ -864,70 +864,66 @@ class NodeExecutors:
         }
 
         return db_result
+    
     async def execute_loop(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]) -> Dict[str, Any]:
-            config = node.data.get('config', {})
-            array_path = config.get('inputArrayPath', 'items')
-            #start
-            # Добавляем отладочную информацию
-            logger.info(f"🔍 Loop node input data: {json.dumps(input_data, ensure_ascii=False)}")
-            logger.info(f"🔍 Looking for array at path: {array_path}")
-            logger.info(f"🔍 Label to ID map: {label_to_id_map}")
-            
-            # Проверяем, начинается ли путь с лейбла
-            path_parts = array_path.split('.')
-            first_part = path_parts[0]
-            
-            # Если первая часть пути - это лейбл, заменяем его на ID
-            if first_part in label_to_id_map:
-                node_id = label_to_id_map[first_part]
-                logger.info(f"🔄 Replacing label '{first_part}' with node ID '{node_id}'")
-                path_parts[0] = node_id
-                array_path = '.'.join(path_parts)
-                logger.info(f"🔄 New path: {array_path}")
-            
-            # Универсальный способ получить массив по пути
-            def get_by_path(data, path):
-                for part in path.split('.'):
-                    if isinstance(data, dict):
-                        data = data.get(part)
-                    else:
-                        return None
-                return data
-
-            array = get_by_path(input_data, array_path)
-            
-            # Добавляем проверку и логирование найденных данных
-            if array is not None:
-                logger.info(f"✅ Found data at path '{array_path}': {json.dumps(array, ensure_ascii=False)}")
-            else:
-                logger.error(f"❌ No data found at path '{array_path}'")
-                
-            if not isinstance(array, list):
-                raise Exception(f"Loop node: input at path '{array_path}' is not a list")
-            #finish
-            sub_workflow_id = config.get('subWorkflowId')
-            execution_mode = config.get('executionMode', 'sequential')
-
-            # Универсальный способ получить массив по пути
-            def get_by_path(data, path):
-                for part in path.split('.'):
-                    if isinstance(data, dict):
-                        data = data.get(part)
-                    else:
-                        return None
-                return data
-
-            array = get_by_path(input_data, array_path)
-            if not isinstance(array, list):
-                raise Exception(f"Loop node: input at path '{array_path}' is not a list")
-            if not sub_workflow_id:
-                raise Exception("Loop node: subWorkflowId is required")
-
-            results = []
-
-            async def run_subworkflow(item, idx):
-                sub_input = {"item": item, "loop_index": idx}
-                # Можно добавить другие поля из input_data, если нужно
+        start_time = datetime.now()
+        
+        # Конфигурация
+        config = node.data.get('config', {})
+        array_path = config.get('inputArrayPath', 'items')
+        sub_workflow_id = config.get('subWorkflowId')
+        execution_mode = config.get('executionMode', 'sequential')
+        max_concurrent = config.get('maxConcurrent', 5)
+        timeout = config.get('timeout', 300)
+        skip_errors = config.get('skipErrors', True)
+        batch_size = config.get('batchSize', 0)
+        
+        # Отладочная информация
+        logger.info(f"🔍 Loop node input data: {json.dumps(input_data, ensure_ascii=False)}")
+        logger.info(f"🔍 Looking for array at path: {array_path}")
+        logger.info(f"🔍 Label to ID map: {label_to_id_map}")
+        
+        # Преобразование лейбла в ID
+        path_parts = array_path.split('.')
+        first_part = path_parts[0]
+        if first_part in label_to_id_map:
+            node_id = label_to_id_map[first_part]
+            logger.info(f"🔄 Replacing label '{first_part}' with node ID '{node_id}'")
+            path_parts[0] = node_id
+            array_path = '.'.join(path_parts)
+            logger.info(f"🔄 New path: {array_path}")
+        
+        # Получение массива по пути
+        def get_by_path(data, path):
+            for part in path.split('.'):
+                if isinstance(data, dict):
+                    data = data.get(part)
+                else:
+                    return None
+            return data
+        
+        array = get_by_path(input_data, array_path)
+        
+        # Проверка и логирование
+        if array is not None:
+            logger.info(f"✅ Found data at path '{array_path}': {json.dumps(array, ensure_ascii=False)}")
+        else:
+            logger.error(f"❌ No data found at path '{array_path}'")
+            raise Exception(f"Loop node: no data found at path '{array_path}'")
+        
+        if not isinstance(array, list):
+            raise Exception(f"Loop node: input at path '{array_path}' is not a list")
+        
+        if not sub_workflow_id:
+            raise Exception("Loop node: subWorkflowId is required")
+        
+        if sub_workflow_id not in saved_workflows:
+            raise Exception(f"Loop node: subWorkflow with ID '{sub_workflow_id}' not found")
+        
+        # Функция для выполнения подпроцесса
+        async def run_subworkflow(item, idx):
+            sub_input = {"item": item, "loop_index": idx}
+            try:
                 result = await execute_workflow_internal(
                     WorkflowExecuteRequest(
                         nodes=saved_workflows[sub_workflow_id]["nodes"],
@@ -935,24 +931,100 @@ class NodeExecutors:
                     ),
                     initial_input_data=sub_input
                 )
-                return result.result
-
+                return {
+                    "success": result.success,
+                    "result": result.result,
+                    "item": item,
+                    "index": idx,
+                    "error": result.error if not result.success else None
+                }
+            except Exception as e:
+                logger.error(f"❌ Error in subworkflow for item {idx}: {str(e)}")
+                if not skip_errors:
+                    raise
+                return {
+                    "success": False,
+                    "result": None,
+                    "item": item,
+                    "index": idx,
+                    "error": str(e)
+                }
+        
+        results = []
+        
+        # Обработка с учетом пакетов
+        if batch_size > 0 and len(array) > batch_size:
+            batches = [array[i:i+batch_size] for i in range(0, len(array), batch_size)]
+            logger.info(f"🔢 Processing array in {len(batches)} batches of size {batch_size}")
+            
+            all_results = []
+            for batch_idx, batch in enumerate(batches):
+                logger.info(f"📦 Processing batch {batch_idx+1}/{len(batches)}")
+                batch_results = []
+                
+                if execution_mode == "parallel":
+                    import asyncio
+                    semaphore = asyncio.Semaphore(max_concurrent)
+                    
+                    async def limited_run(item, global_idx):
+                        async with semaphore:
+                            return await run_subworkflow(item, global_idx)
+                    
+                    start_idx = batch_idx * batch_size
+                    tasks = [limited_run(item, start_idx + idx) for idx, item in enumerate(batch)]
+                    batch_results = await asyncio.gather(*tasks, return_exceptions=skip_errors)
+                else:
+                    start_idx = batch_idx * batch_size
+                    for idx, item in enumerate(batch):
+                        global_idx = start_idx + idx
+                        batch_results.append(await run_subworkflow(item, global_idx))
+                
+                all_results.extend(batch_results)
+            
+            results = all_results
+        else:
+            # Обычная обработка без пакетов
             if execution_mode == "parallel":
                 import asyncio
-                tasks = [run_subworkflow(item, idx) for idx, item in enumerate(array)]
-                results = await asyncio.gather(*tasks)
+                semaphore = asyncio.Semaphore(max_concurrent)
+                
+                async def limited_run(item, idx):
+                    async with semaphore:
+                        return await run_subworkflow(item, idx)
+                
+                tasks = [limited_run(item, idx) for idx, item in enumerate(array)]
+                results = await asyncio.gather(*tasks, return_exceptions=skip_errors)
+                
+                # Обработка исключений
+                if not skip_errors:
+                    for result in results:
+                        if isinstance(result, Exception):
+                            raise result
             else:
                 for idx, item in enumerate(array):
                     results.append(await run_subworkflow(item, idx))
-
-            return {
-                "results": results,
-                "meta": {
-                    "executed": len(results),
-                    "success_count": sum(1 for r in results if r.get('success', True)),
-                    "execution_mode": execution_mode
-                }
+        
+        # Формирование итогового результата
+        execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        success_count = sum(1 for r in results if r.get('success', True))
+        error_count = len(results) - success_count
+        
+        return {
+            "results": results,
+            "summary": {
+                "total": len(array),
+                "executed": len(results),
+                "success_count": success_count,
+                "error_count": error_count,
+                "execution_mode": execution_mode,
+                "execution_time_ms": execution_time_ms
+            },
+            "output": {
+                "text": f"Processed {len(array)} items with {success_count} successes and {error_count} errors",
+                "json": results
             }
+        }
+    
     async def execute_webhook(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Выполнение Webhook ноды с новой структурой вывода и явным шаблоном для тела запроса.
