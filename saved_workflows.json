@@ -10,30 +10,12 @@
                     "y": 34.0
                 },
                 "data": {
-                    "label": "GigaChat AI",
+                    "label": "first",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "загадай число от 1 до 3.\nответ должен быть только цифра",
-                        "clearHistory": true
-                    }
-                }
-            },
-            {
-                "id": "node-1751233061857",
-                "type": "gigachat",
-                "position": {
-                    "x": 276.0,
-                    "y": 273.0
-                },
-                "data": {
-                    "label": "GigaChat AI",
-                    "config": {
-                        "role": "translator",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
-                        "systemMessage": "Ты профессиональный переводчик. Переводи тексты точно, сохраняя смысл и стиль оригинала.",
-                        "userMessage": "Переведи на английский: Искусственный интеллект меняет мир.",
                         "clearHistory": true
                     }
                 }
@@ -46,25 +28,25 @@
                     "y": 13.0
                 },
                 "data": {
-                    "label": "GigaChat AI",
+                    "label": "two",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
-                        "userMessage": "Привет! Угадай число",
+                        "userMessage": "Привет! Угадай число , оно загадано в {{ node-1751231126445.json }}",
                         "clearHistory": false
                     }
                 }
             },
             {
-                "id": "node-1751661728069",
+                "id": "node-1752419757649",
                 "type": "join",
                 "position": {
-                    "x": 651.0,
-                    "y": 181.0
+                    "x": 386.0,
+                    "y": 272.0
                 },
                 "data": {
-                    "label": "Join/Merge",
+                    "label": "Join",
                     "config": {
                         "waitForAll": true,
                         "mergeStrategy": "combine_text",
@@ -73,19 +55,37 @@
                 }
             },
             {
-                "id": "node-1751661736969",
+                "id": "node-1752419781952",
                 "type": "gigachat",
                 "position": {
-                    "x": 893.0,
-                    "y": 401.0
+                    "x": 130.0,
+                    "y": 317.0
+                },
+                "data": {
+                    "label": "Giga",
+                    "config": {
+                        "role": "assistant",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
+                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
+                        "userMessage": "Привет! Расскажи что-нибудь интересное о программировании.",
+                        "clearHistory": false
+                    }
+                }
+            },
+            {
+                "id": "node-1752419801864",
+                "type": "gigachat",
+                "position": {
+                    "x": 782.0,
+                    "y": 359.0
                 },
                 "data": {
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
-                        "userMessage": "Привет! О чем разговор",
+                        "userMessage": "Привет! Расскажи о чем разговор в {{ Join.join_result.sources }}",
                         "clearHistory": false
                     }
                 }
@@ -99,32 +99,32 @@
                 "data": {}
             },
             {
-                "id": "node-1751231126445-node-1751233061857-1751661725487",
-                "source": "node-1751231126445",
-                "target": "node-1751233061857",
-                "data": {}
-            },
-            {
-                "id": "node-1751661719452-node-1751661728069-1751661731552",
+                "id": "node-1751661719452-node-1752419757649-1752419760531",
                 "source": "node-1751661719452",
-                "target": "node-1751661728069",
+                "target": "node-1752419757649",
                 "data": {}
             },
             {
-                "id": "node-1751233061857-node-1751661728069-1751661734935",
-                "source": "node-1751233061857",
-                "target": "node-1751661728069",
+                "id": "node-1751231126445-node-1752419781952-1752419785975",
+                "source": "node-1751231126445",
+                "target": "node-1752419781952",
                 "data": {}
             },
             {
-                "id": "node-1751661728069-node-1751661736969-1751661741179",
-                "source": "node-1751661728069",
-                "target": "node-1751661736969",
+                "id": "node-1752419781952-node-1752419757649-1752419787622",
+                "source": "node-1752419781952",
+                "target": "node-1752419757649",
+                "data": {}
+            },
+            {
+                "id": "node-1752419757649-node-1752419801864-1752419805819",
+                "source": "node-1752419757649",
+                "target": "node-1752419801864",
                 "data": {}
             }
         ],
         "created_at": "2025-06-23T17:57:42.984665",
-        "updated_at": "2025-07-06T12:18:53.310832"
+        "updated_at": "2025-07-13T18:18:11.617574"
     },
     "main": {
         "name": "main",
@@ -147,19 +147,19 @@
                                 "keywords": [
                                     "музыка"
                                 ],
-                                "description": "все что связано с музыкой"
+                                "description": "Рассказать интересный факт о музыке"
                             },
                             "coding": {
                                 "workflow_id": "test_gigachat",
                                 "keywords": [
                                     "программирование"
                                 ],
-                                "description": "все что связано с программированием"
+                                "description": "Рассказать интересный факт о программировании"
                             }
                         },
                         "userQueryTemplate": "{{ node-1750708980650.output.query }}",
                         "dispatcherPrompt": "Ты — умный маршрутизатор. Категории: {категории}. Запрос: {запрос пользователя}. Ответь категорией.\n",
-                        "dispatcherType": "router",
+                        "dispatcherType": "orchestrator",
                         "availableWorkflows": {
                             "test_gigachat": {
                                 "description": "test_gigachat"
@@ -184,8 +184,8 @@
                         "url": "https://api.example.com/webhook",
                         "method": "POST",
                         "headers": "Content-Type: application/json",
-                        "webhookId": "1bd3fbd0-7d23-4106-b4f0-03afe45f446c",
-                        "webhookUrl": "http://localhost:8000/webhooks/1bd3fbd0-7d23-4106-b4f0-03afe45f446c"
+                        "webhookId": "6dc6ff51-b009-4662-8d06-88c6ded84158",
+                        "webhookUrl": "http://localhost:8000/webhooks/6dc6ff51-b009-4662-8d06-88c6ded84158"
                     }
                 }
             }
@@ -199,7 +199,7 @@
             }
         ],
         "created_at": "2025-06-23T21:15:20.064651",
-        "updated_at": "2025-07-13T17:23:44.233318"
+        "updated_at": "2025-07-26T21:23:07.515759"
     },
     "timer_test_workflow": {
         "name": "Timer Test Workflow",
@@ -243,7 +243,7 @@
             }
         ],
         "created_at": "2025-06-25T22:06:45.243317",
-        "updated_at": "2025-07-12T09:58:20.321934"
+        "updated_at": "2025-07-26T23:25:35.457956"
     },
     "sales_consultation": {
         "name": "sales_consultation",
@@ -688,7 +688,7 @@
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "Придумай смешное имя для кота. Ответь только именем, без лишних слов.",
                         "clearHistory": false
@@ -726,7 +726,7 @@
             }
         ],
         "created_at": "2025-06-30T23:40:18.588855",
-        "updated_at": "2025-07-01T00:07:34.338014"
+        "updated_at": "2025-07-26T21:53:52.186109"
     },
     "triger_webhook": {
         "name": "triger_webhook",
@@ -950,7 +950,7 @@
             }
         ],
         "created_at": "2025-07-05T09:04:34.692187",
-        "updated_at": "2025-07-06T01:03:33.630672"
+        "updated_at": "2025-07-13T17:59:46.900748"
     },
     "testiruem_timer": {
         "name": "testiruem timer",
@@ -966,7 +966,7 @@
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "назови число от 1 до 5, у тебя в ответе должна быть просто цифра",
                         "clearHistory": false
@@ -1034,22 +1034,30 @@
                 "data": {}
             },
             {
-                "id": "node-1751702939141-node-1751703106357-1751703236317",
-                "source": "node-1751702939141",
-                "target": "node-1751703106357",
-                "data": {
-                    "label": "false"
-                }
-            },
-            {
                 "id": "node-1751704302497-node-1751702932946-1751704306131",
                 "source": "node-1751704302497",
                 "target": "node-1751702932946",
                 "data": {}
+            },
+            {
+                "id": "node-1751702939141-node-1751703106357-1753561837940",
+                "source": "node-1751702939141",
+                "target": "node-1751703106357",
+                "data": {
+                    "label": "true"
+                }
+            },
+            {
+                "id": "node-1751702939141-node-1751702932946-1753561851008",
+                "source": "node-1751702939141",
+                "target": "node-1751702932946",
+                "data": {
+                    "label": "false:goto"
+                }
             }
         ],
         "created_at": "2025-07-05T11:36:40.827026",
-        "updated_at": "2025-07-05T19:18:37.446213"
+        "updated_at": "2025-07-26T23:30:56.661469"
     },
     "telegram_ai": {
         "name": "telegram_ai",
@@ -1258,7 +1266,7 @@
                         "role": "assistant",
                         "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
-                        "userMessage": "Привет! Расскажи что-нибудь интересное на предложенную тему разговора. Сама тема указана в {{ node-1750708980650.output.query }}",
+                        "userMessage": "Привет! Расскажи что-нибудь интересное про {{ item }}.\n",
                         "clearHistory": false
                     }
                 }
@@ -1266,6 +1274,54 @@
         ],
         "connections": [],
         "created_at": "2025-07-13T01:03:01.900059",
-        "updated_at": "2025-07-13T11:26:12.176727"
+        "updated_at": "2025-07-27T00:52:28.666920"
+    },
+    "loop": {
+        "name": "тестируемLoop",
+        "nodes": [
+            {
+                "id": "node-1753565785314",
+                "type": "gigachat",
+                "position": {
+                    "x": 205.0,
+                    "y": 94.0
+                },
+                "data": {
+                    "label": "giga",
+                    "config": {
+                        "role": "assistant",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
+                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
+                        "userMessage": "Придумай список из 2 русских имени, ответ запиши в виде массив в формате json",
+                        "clearHistory": false
+                    }
+                }
+            },
+            {
+                "id": "node-1753566185496",
+                "type": "loop",
+                "position": {
+                    "x": 478.0,
+                    "y": 119.0
+                },
+                "data": {
+                    "label": "Loop",
+                    "config": {
+                        "inputArrayPath": "node-1753565785314.json",
+                        "subWorkflowId": "test_gigachat2"
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "node-1753565785314-node-1753566185496-1753566252384",
+                "source": "node-1753565785314",
+                "target": "node-1753566185496",
+                "data": {}
+            }
+        ],
+        "created_at": "2025-07-27T00:43:02.820809",
+        "updated_at": "2025-07-27T13:00:09.177763"
     }
 }

@@ -218,7 +218,7 @@ class GigaChatAPI:
 
         url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
         payload = {
-            "model": "GigaChat-Pro",
+            "model": "GigaChat-Max",
             "messages": messages,
             "temperature": 1,
             "top_p": 0.1,
@@ -864,7 +864,95 @@ class NodeExecutors:
         }
 
         return db_result
+    async def execute_loop(self, node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any]) -> Dict[str, Any]:
+            config = node.data.get('config', {})
+            array_path = config.get('inputArrayPath', 'items')
+            #start
+            # Добавляем отладочную информацию
+            logger.info(f"🔍 Loop node input data: {json.dumps(input_data, ensure_ascii=False)}")
+            logger.info(f"🔍 Looking for array at path: {array_path}")
+            logger.info(f"🔍 Label to ID map: {label_to_id_map}")
+            
+            # Проверяем, начинается ли путь с лейбла
+            path_parts = array_path.split('.')
+            first_part = path_parts[0]
+            
+            # Если первая часть пути - это лейбл, заменяем его на ID
+            if first_part in label_to_id_map:
+                node_id = label_to_id_map[first_part]
+                logger.info(f"🔄 Replacing label '{first_part}' with node ID '{node_id}'")
+                path_parts[0] = node_id
+                array_path = '.'.join(path_parts)
+                logger.info(f"🔄 New path: {array_path}")
+            
+            # Универсальный способ получить массив по пути
+            def get_by_path(data, path):
+                for part in path.split('.'):
+                    if isinstance(data, dict):
+                        data = data.get(part)
+                    else:
+                        return None
+                return data
 
+            array = get_by_path(input_data, array_path)
+            
+            # Добавляем проверку и логирование найденных данных
+            if array is not None:
+                logger.info(f"✅ Found data at path '{array_path}': {json.dumps(array, ensure_ascii=False)}")
+            else:
+                logger.error(f"❌ No data found at path '{array_path}'")
+                
+            if not isinstance(array, list):
+                raise Exception(f"Loop node: input at path '{array_path}' is not a list")
+            #finish
+            sub_workflow_id = config.get('subWorkflowId')
+            execution_mode = config.get('executionMode', 'sequential')
+
+            # Универсальный способ получить массив по пути
+            def get_by_path(data, path):
+                for part in path.split('.'):
+                    if isinstance(data, dict):
+                        data = data.get(part)
+                    else:
+                        return None
+                return data
+
+            array = get_by_path(input_data, array_path)
+            if not isinstance(array, list):
+                raise Exception(f"Loop node: input at path '{array_path}' is not a list")
+            if not sub_workflow_id:
+                raise Exception("Loop node: subWorkflowId is required")
+
+            results = []
+
+            async def run_subworkflow(item, idx):
+                sub_input = {"item": item, "loop_index": idx}
+                # Можно добавить другие поля из input_data, если нужно
+                result = await execute_workflow_internal(
+                    WorkflowExecuteRequest(
+                        nodes=saved_workflows[sub_workflow_id]["nodes"],
+                        connections=saved_workflows[sub_workflow_id]["connections"]
+                    ),
+                    initial_input_data=sub_input
+                )
+                return result.result
+
+            if execution_mode == "parallel":
+                import asyncio
+                tasks = [run_subworkflow(item, idx) for idx, item in enumerate(array)]
+                results = await asyncio.gather(*tasks)
+            else:
+                for idx, item in enumerate(array):
+                    results.append(await run_subworkflow(item, idx))
+
+            return {
+                "results": results,
+                "meta": {
+                    "executed": len(results),
+                    "success_count": sum(1 for r in results if r.get('success', True)),
+                    "execution_mode": execution_mode
+                }
+            }
     async def execute_webhook(self, node: Node, label_to_id_map: Dict[str, str],input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Выполнение Webhook ноды с новой структурой вывода и явным шаблоном для тела запроса.
@@ -1732,7 +1820,8 @@ async def execute_node(
             'join': executors.execute_join,
             'request_iterator': executors.execute_request_iterator,
             'if_else': executors.execute_if_else,  # Добавляем новый исполнитель
-            'dispatcher': executors.execute_dispatcher # НОВОЕ
+            'dispatcher': executors.execute_dispatcher, # НОВОЕ
+            'loop': executors.execute_loop
             
         }
 
@@ -2270,6 +2359,7 @@ async def execute_workflow_internal(request: WorkflowExecuteRequest, initial_inp
                 'join': executors.execute_join,
                 'request_iterator': executors.execute_request_iterator,
                 'if_else': executors.execute_if_else,
+                'loop': executors.execute_loop,
                 'dispatcher': executors.execute_dispatcher
             }
 

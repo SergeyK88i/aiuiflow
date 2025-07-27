@@ -24,6 +24,7 @@ import {
   GitBranch,
   Box,
   FolderOpen,
+  HopIcon,
   Copy // иконка для открытия
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -119,6 +120,7 @@ const nodeTypes = [
   { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false },
   { type: "request_iterator", label: "Request Iterator", icon: ListChecks, color: "bg-teal-500", canStart: false },
   {type: "if_else",label: "If/Else",icon: GitBranch, color: "bg-purple-500",description: "Условное ветвление с поддержкой циклов"},
+  { type: "loop", label: "Loop", icon: HopIcon , color: "blue" },
   // НОВОЕ: Добавляем ноду Диспетчер
   { 
     type: "dispatcher", 
@@ -1807,6 +1809,41 @@ useEffect(() => {
                       </div>
                     </>
                   )}
+                  {selectedNode.type === "loop" && (
+  <>
+    <div>
+      <label>Путь к массиву</label>
+      <input
+        value={selectedNode.data.config.inputArrayPath || ""}
+        onChange={e => updateNodeConfig("inputArrayPath", e.target.value)}
+        placeholder="users"
+      />
+    </div>
+    <div>
+      <label>Sub-workflow</label>
+      <select
+        value={selectedNode.data.config.subWorkflowId || ""}
+        onChange={e => updateNodeConfig("subWorkflowId", e.target.value)}
+      >
+        <option value="">Выберите workflow...</option>
+        {workflows.map(wf => (
+          <option key={wf.id} value={wf.id}>{wf.name}</option>
+        ))}
+      </select>
+    </div>
+    <div>
+      <label>Режим выполнения</label>
+      <select
+        value={selectedNode.data.config.executionMode || "sequential"}
+        onChange={e => updateNodeConfig("executionMode", e.target.value)}
+      >
+        <option value="sequential">Последовательно</option>
+        <option value="parallel">Параллельно</option>
+      </select>
+    </div>
+  </>
+)}
+
                   {selectedNode.type === "webhook" && (
                     <>
                       <div>
