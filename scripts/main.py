@@ -1,0 +1,49 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import logging
+from starlette.background import BackgroundTasks
+
+from scripts.api.v1 import workflows, execution, timers, webhooks
+from scripts.services.storage import load_workflows_from_disk
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="N8N Clone API", version="1.0.0")
+
+# Добавляем хранилище для фоновых задач
+app.state.background_tasks = set()
+
+# Настройка CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # В продакшене указать конкретные домены
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Подключаем роутеры
+app.include_router(workflows.router, prefix="/api/v1", tags=["Workflows"])
+app.include_router(execution.router, prefix="/api/v1", tags=["Execution"])
+app.include_router(timers.router, prefix="/api/v1", tags=["Timers"])
+app.include_router(webhooks.router, prefix="/api/v1", tags=["Webhooks"]) # <--- ДОБАВЛЕНО
+
+@app.on_event("startup")
+def on_startup():
+    """Действия при старте приложения."""
+    logger.info("🚀 Приложение запускается...")
+    load_workflows_from_disk()
+
+@app.get("/")
+async def root():
+    return {"message": "N8N Clone API Server", "version": "1.0.0"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

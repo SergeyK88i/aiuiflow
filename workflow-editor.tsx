@@ -108,7 +108,7 @@ interface ConnectionWithLabel extends Connection {
   };
 }
 
-const API_BASE_URL = "http://localhost:8000"
+const API_BASE_URL = "http://localhost:8000/api/v1"
 
 const nodeTypes = [
   { type: "gigachat", label: "GigaChat AI", icon: MessageSquare, color: "bg-orange-500", canStart: true },
@@ -720,20 +720,19 @@ const getSanitizedConnections = () => {
 
   // Загрузка и обновление таймеров
   useEffect(() => {
-    // Загружаем таймеры при монтировании компонента
-    loadTimers()
+    if (apiStatus === "online") {
+      loadTimers()
 
-    // Устанавливаем интервал для обновления таймеров
-    const interval = setInterval(loadTimers, 10000) // Обновляем каждые 10 секунд
-    setTimerRefreshInterval(interval)
+      const interval = setInterval(loadTimers, 10000) 
+      setTimerRefreshInterval(interval)
 
-    return () => {
-      // Очищаем интервал при размонтировании компонента
-      if (timerRefreshInterval) {
-        clearInterval(timerRefreshInterval)
-      }
-      if (interval) {
-        clearInterval(interval)
+      return () => {
+        if (timerRefreshInterval) {
+          clearInterval(timerRefreshInterval)
+        }
+        if (interval) {
+          clearInterval(interval)
+        }
       }
     }
   }, [apiStatus])
@@ -925,7 +924,7 @@ useEffect(() => {
         console.log("⏰ Таймаут подключения к API")
       }, 5000)
 
-      const response = await fetch(`${API_BASE_URL}/health`, {
+      const response = await fetch(`${API_BASE_URL.replace("/api/v1", "")}/health`, {
         method: "GET",
         signal: controller.signal,
         headers: {
@@ -1544,7 +1543,7 @@ useEffect(() => {
             <br />
             Или проверьте:{" "}
             <a href="http://localhost:8000/health" target="_blank" className="text-blue-600 underline" rel="noreferrer">
-              http
+              http://localhost:8000/health
             </a>
           </AlertDescription>
         </Alert>

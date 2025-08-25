@@ -42,8 +42,8 @@
                 "id": "node-1752419757649",
                 "type": "join",
                 "position": {
-                    "x": 386.0,
-                    "y": 272.0
+                    "x": 437.0,
+                    "y": 303.0
                 },
                 "data": {
                     "label": "Join",
@@ -124,7 +124,7 @@
             }
         ],
         "created_at": "2025-06-23T17:57:42.984665",
-        "updated_at": "2025-07-13T18:18:11.617574"
+        "updated_at": "2025-08-21T17:20:28.411147"
     },
     "main": {
         "name": "main",
@@ -199,7 +199,7 @@
             }
         ],
         "created_at": "2025-06-23T21:15:20.064651",
-        "updated_at": "2025-07-26T21:23:07.515759"
+        "updated_at": "2025-08-21T17:16:02.767194"
     },
     "timer_test_workflow": {
         "name": "Timer Test Workflow",
@@ -243,7 +243,7 @@
             }
         ],
         "created_at": "2025-06-25T22:06:45.243317",
-        "updated_at": "2025-07-26T23:25:35.457956"
+        "updated_at": "2025-08-23T23:18:26.181451"
     },
     "sales_consultation": {
         "name": "sales_consultation",
@@ -735,8 +735,8 @@
                 "id": "node-1751319616192",
                 "type": "webhook_trigger",
                 "position": {
-                    "x": 300.0,
-                    "y": 200.0
+                    "x": 239.0,
+                    "y": 238.0
                 },
                 "data": {
                     "label": "Webhook Trigger",
@@ -744,8 +744,9 @@
                         "url": "https://api.example.com/webhook",
                         "method": "POST",
                         "headers": "Content-Type: application/json",
-                        "webhookId": "33939a64-3b8b-47bf-973e-fc4c532835a3",
-                        "webhookUrl": "http://localhost:8000/webhooks/33939a64-3b8b-47bf-973e-fc4c532835a3"
+                        "webhookId": "fdcd75f0-4dae-4873-ac57-5943f4c6c759",
+                        "webhookUrl": "http://localhost:8000api/v1/webhooks/fdcd75f0-4dae-4873-ac57-5943f4c6c759",
+                        "allowedIps": ""
                     }
                 }
             },
@@ -753,14 +754,14 @@
                 "id": "node-1751319906569",
                 "type": "gigachat",
                 "position": {
-                    "x": 607.0,
-                    "y": 130.0
+                    "x": 620.0,
+                    "y": 136.0
                 },
                 "data": {
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "Напиши короткую статью на тему \"{{ output.topic }}\".\nУпомяни, что автора зовут {{ output.author_name }}.\nСтиль должен быть {{ output.style }}.\n",
                         "clearHistory": false
@@ -777,7 +778,7 @@
             }
         ],
         "created_at": "2025-07-01T00:40:35.830239",
-        "updated_at": "2025-07-05T16:36:03.528576"
+        "updated_at": "2025-08-25T23:58:08.638748"
     },
     "full_test": {
         "name": "full_test",
@@ -793,7 +794,7 @@
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "твоя задача выбрать ОДИН  все get запросы из предложенного массив и в ответе вернуть вот  json, кроме json больше нечего не пиши\n[\n  {\n    \"endpoint\": \"/users/1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/posts\",\n    \"method\": \"POST\",\n    \"body\": {\n      \"title\": \"Test\",\n      \"body\": \"Hello\",\n      \"userId\": 1\n    }\n  },\n  {\n    \"endpoint\": \"/comments?postId=1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/todos/5\",\n    \"method\": \"PATCH\",\n    \"body\": {\n      \"completed\": true\n    }\n  },\n  {\n    \"endpoint\": \"/albums\",\n    \"method\": \"GET\"\n  }\n]\n",
                         "clearHistory": false
@@ -848,24 +849,6 @@
                         "separator": "\n\n---\n\n"
                     }
                 }
-            },
-            {
-                "id": "node-1751402270789",
-                "type": "gigachat",
-                "position": {
-                    "x": 170.0,
-                    "y": 613.0
-                },
-                "data": {
-                    "label": "GigaChat AI",
-                    "config": {
-                        "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
-                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
-                        "userMessage": "Привет! Расскажи что-нибудь интересное о программировании.",
-                        "clearHistory": false
-                    }
-                }
             }
         ],
         "connections": [
@@ -892,16 +875,10 @@
                 "source": "node-1751391354756",
                 "target": "node-1751402260573",
                 "data": {}
-            },
-            {
-                "id": "node-1751402260573-node-1751402270789-1751402288586",
-                "source": "node-1751402260573",
-                "target": "node-1751402270789",
-                "data": {}
             }
         ],
         "created_at": "2025-07-01T20:34:28.349334",
-        "updated_at": "2025-07-05T16:12:25.859954"
+        "updated_at": "2025-08-03T19:58:09.931389"
     },
     "full_test_": {
         "name": "full_test (копия)",
@@ -1057,7 +1034,7 @@
             }
         ],
         "created_at": "2025-07-05T11:36:40.827026",
-        "updated_at": "2025-07-26T23:30:56.661469"
+        "updated_at": "2025-08-25T23:58:20.281266"
     },
     "telegram_ai": {
         "name": "telegram_ai",
@@ -1323,6 +1300,93 @@
             }
         ],
         "created_at": "2025-07-27T00:43:02.820809",
-        "updated_at": "2025-07-27T20:41:32.718125"
+        "updated_at": "2025-08-03T15:43:36.014751"
+    },
+    "__workflow1": {
+        "name": "Мой новый workflow1",
+        "nodes": [
+            {
+                "id": "node-1754216308265",
+                "type": "gigachat",
+                "position": {
+                    "x": 300.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "gigachat node",
+                    "config": {}
+                }
+            }
+        ],
+        "connections": [],
+        "created_at": "2025-08-03T13:18:59.071232",
+        "updated_at": "2025-08-03T13:28:34.513410"
+    },
+    "test_workflow": {
+        "name": "Test Workflow",
+        "nodes": [
+            {
+                "id": "node-1754222495364",
+                "type": "gigachat",
+                "position": {
+                    "x": 300.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "gigachat",
+                    "config": {}
+                }
+            }
+        ],
+        "connections": [],
+        "created_at": "2025-08-03T13:35:50.196601",
+        "updated_at": "2025-08-03T15:15:24.313486"
+    },
+    "5_minute_timer_workflow": {
+        "name": "5 Minute Timer Workflow",
+        "nodes": [
+            {
+                "id": "node-1754223820749",
+                "type": "timer",
+                "position": {
+                    "x": 300.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "Timer Trigger",
+                    "config": {
+                        "interval": "1",
+                        "timezone": "UTC"
+                    }
+                }
+            }
+        ],
+        "connections": [],
+        "created_at": "2025-08-03T13:45:21.999222",
+        "updated_at": "2025-08-03T15:37:55.409123"
+    },
+    "__workflow123123": {
+        "name": "Мой новый workflow123123",
+        "nodes": [
+            {
+                "id": "node-1755969056221",
+                "type": "webhook_trigger",
+                "position": {
+                    "x": 300.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "Webhook Trigger",
+                    "config": {
+                        "url": "https://api.example.com/webhook",
+                        "method": "POST",
+                        "headers": "Content-Type: application/json"
+                    }
+                }
+            }
+        ],
+        "connections": [],
+        "created_at": "2025-08-24T00:11:15.565218",
+        "updated_at": "2025-08-24T00:19:35.134618"
     }
 }

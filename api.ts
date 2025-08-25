@@ -36,7 +36,7 @@ export interface NodeData {
     connections: ConnectionData[]; // Замените any на тип Connection
     startNodeId?: string;
   }
-  const API_BASE_URL = "http://localhost:8000"; // Убедитесь, что порт верный
+  const API_BASE_URL = "http://localhost:8000/api/v1"; // Убедитесь, что порт верный
   
   // Получить список всех workflows
   export const listWorkflows = async (): Promise<WorkflowListItem[]> => {

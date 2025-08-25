@@ -12,7 +12,7 @@
 venv
 # testing
 /coverage
-
+*.pyc
 # next.js
 /.next/
 /out/
