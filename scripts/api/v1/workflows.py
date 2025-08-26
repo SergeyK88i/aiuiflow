@@ -46,10 +46,40 @@ async def create_workflow(request: WorkflowSaveRequest):
         "nodes": [node.dict() for node in request.nodes],
         "connections": [conn.dict() for conn in request.connections],
         "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat()
+        "updated_at": datetime.now().isoformat(),
+        "status": "draft"  # НОВОЕ: Устанавливаем статус по умолчанию
     }
     add_workflow(workflow_id, workflow_data)
     return {"success": True, "workflow_id": workflow_id, "name": request.name}
+
+
+@router.post("/workflows/{workflow_id}/publish", status_code=status.HTTP_200_OK)
+async def publish_workflow(workflow_id: str):
+    """Публикует workflow, делая его триггеры активными."""
+    workflow = get_workflow_by_id(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    
+    workflow["status"] = "published"
+    workflow["updated_at"] = datetime.now().isoformat()
+    add_workflow(workflow_id, workflow)
+    
+    return {"success": True, "message": f"Workflow '{workflow_id}' has been published."}
+
+
+@router.post("/workflows/{workflow_id}/unpublish", status_code=status.HTTP_200_OK)
+async def unpublish_workflow(workflow_id: str):
+    """Снимает workflow с публикации, делая его триггеры неактивными."""
+    workflow = get_workflow_by_id(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    
+    workflow["status"] = "draft"
+    workflow["updated_at"] = datetime.now().isoformat()
+    add_workflow(workflow_id, workflow)
+    
+    return {"success": True, "message": f"Workflow '{workflow_id}' has been unpublished and is now a draft."}
+
 
 @router.put("/workflows/{workflow_id}")
 async def update_workflow(workflow_id: str, request: WorkflowUpdateRequest):

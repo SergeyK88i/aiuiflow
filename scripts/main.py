@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="N8N Clone API", version="1.0.0")
 
-# Добавляем хранилище для фоновых задач
-app.state.background_tasks = set()
+
 
 # Настройка CORS
 app.add_middleware(

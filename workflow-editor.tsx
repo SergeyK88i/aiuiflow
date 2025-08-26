@@ -25,7 +25,9 @@ import {
   Box,
   FolderOpen,
   HopIcon,
-  Copy // иконка для открытия
+  Copy,
+  UploadCloud, // ДОБАВЛЕНО
+  PowerOff // ДОБАВЛЕНО // иконка для открытия
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -199,6 +201,7 @@ export default function WorkflowEditor() {
   const [workflows, setWorkflows] = useState<api.WorkflowListItem[]>([]);
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null);
   const [currentWorkflowName, setCurrentWorkflowName] = useState<string>("Новый Workflow");
+  const [workflowStatus, setWorkflowStatus] = useState<'draft' | 'published'>('draft');
   const [isWorkflowModalOpen, setWorkflowModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   // const WorkflowEditor = () => {
@@ -235,8 +238,9 @@ const handleLoadWorkflow = async (id: string) => {
       setConnections(workflowData.connections || []);
       setCurrentWorkflowId(id);
       setCurrentWorkflowName(workflowData.name);
+      setWorkflowStatus(workflowData.status || 'draft');
       setWorkflowModalOpen(false); // Закрываем модалку после загрузки
-      console.log(`Workflow "${workflowData.name}" loaded.`);
+      console.log(`Workflow "${workflowData.name}" loaded with status: ${workflowData.status || 'draft'}.`);
   } catch (error) {
       console.error(`Failed to load workflow ${id}:`, error);
       // Тут можно показать уведомление об ошибке
@@ -255,6 +259,7 @@ const handleCreateWorkflow = async (name: string) => {
       setConnections([]);
       setCurrentWorkflowId(result.workflow_id);
       setCurrentWorkflowName(name);
+      setWorkflowStatus('draft');
       setWorkflowModalOpen(false);
       console.log(`Workflow "${name}" created with id ${result.workflow_id}.`);
   } catch (error) {
@@ -325,7 +330,7 @@ const handleSave = async () => {
       if (currentWorkflowId) {
           // --- ОБНОВЛЕНИЕ СУЩЕСТВУЮЩЕГО WORKFLOW ---
           await api.updateWorkflow(currentWorkflowId, workflowData);
-          console.log(`✅ Workflow "${currentWorkflowName}" updated.`);
+          console.log(`✅ Workflow "${currentWorkflowName}" (draft) updated.`);
       } else {
           // --- СОЗДАНИЕ НОВОГО WORKFLOW ---
           const name = prompt("Введите имя для нового workflow:", "Мой новый workflow");
@@ -337,6 +342,7 @@ const handleSave = async () => {
               
               setCurrentWorkflowId(result.workflow_id);
               setCurrentWorkflowName(name);
+              setWorkflowStatus('draft');
               await loadWorkflowsList(); // Обновляем список, чтобы он появился в модалке
               console.log(`✅ Workflow "${name}" created with id ${result.workflow_id}.`);
           } else {
@@ -346,29 +352,7 @@ const handleSave = async () => {
           }
       }
 
-      // --- НОВЫЙ БЛОК: НАСТРОЙКА ТАЙМЕРА ПОСЛЕ СОХРАНЕНИЯ ---
-      // Проверяем, есть ли в workflow нода таймера
-      const timerNode = nodes.find(n => n.type === 'timer');
-
-      // Если есть нода таймера и у нас есть ID workflow...
-      if (timerNode && savedWorkflowId) {
-          console.log(`🕒 Found timer node (${timerNode.id}). Setting up schedule for workflow ${savedWorkflowId}...`);
-          try {
-              // ...вызываем новый эндпоинт для настройки расписания
-              const timerResult = await api.setupTimer(timerNode, savedWorkflowId);
-              console.log(`✅ Timer setup successful:`, timerResult.message);
-              // Опционально: можно показать уведомление об успехе
-              // alert("Расписание для workflow успешно настроено!");
-              
-              // Обновляем список активных таймеров в UI
-              await loadTimers();
-
-          } catch (error) {
-              console.error("❌ Failed to set up timer:", error);
-              alert(`Ошибка настройки расписания: ${error.message}`);
-          }
-      }
-      // --- КОНЕЦ НОВОГО БЛОКА ---
+      
 
   } catch (error) {
       console.error("❌ Failed to save workflow:", error);
@@ -377,13 +361,65 @@ const handleSave = async () => {
       setIsSaving(false);
   }
 };
-
+// ДОБАВЬТЕ ЭТИ ДВЕ ФУНКЦИИ
+   
+   const handlePublish = async () => {
+     if (!currentWorkflowId) {
+         alert("Сначала сохраните workflow, чтобы его можно было опубликовать.");
+         return;
+     }
+     setIsSaving(true);
+     try {
+          await api.publishWorkflow(currentWorkflowId);
+          setWorkflowStatus('published');
+          console.log(`✅ Workflow " ${currentWorkflowName}" published.`);
+    
+          // Логика активации таймера теперь здесь!
+          const timerNode = nodes.find(n => n.type === 'timer');
+          if (timerNode) {
+              console.log(`🕒 Activating timer for published workflow...`);
+              await api.setupTimer(timerNode, currentWorkflowId);
+              console.log(`✅ Timer activated.` );
+          }
+          alert("Workflow успешно опубликован и активирован!");
+      } catch (error) {
+          console.error("❌ Failed to publish workflow:" , error);
+          alert(`Ошибка публикации: ${error.message}`);
+     } finally {
+          setIsSaving(false);
+      }
+    };
+   
+   const handleUnpublish = async () => {
+     if (!currentWorkflowId) return;
+     setIsSaving(true);
+     try {
+         await api.unpublishWorkflow(currentWorkflowId);
+         setWorkflowStatus('draft');
+         console.log(`✅ Workflow " ${currentWorkflowName}" unpublished.`);
+   
+         // Логика деактивации таймера
+         const timerNode = nodes.find(n => n.type === 'timer');
+         if (timerNode) {
+             console.log(`🕒 Deactivating timer for draft workflow...`);
+             await api.setupTimer(timerNode, currentWorkflowId);
+             console.log(`✅ Timer deactivated.` );
+         }
+         alert("Workflow снят с публикации. Все триггеры неактивны.");
+     } catch (error) {
+         console.error("❌ Failed to unpublish workflow:" , error);
+         alert(`Ошибка снятия с публикации: ${error.message}`);
+     } finally {
+         setIsSaving(false);
+     }
+   };
 // Функция для создания нового "безымянного" workflow на холсте
 const handleNewWorkflow = () => {
   setNodes([]);
   setConnections([]);
   setCurrentWorkflowId(null);
   setCurrentWorkflowName("Новый Workflow");
+  setWorkflowStatus('draft');
   console.log("Cleared canvas for a new workflow.");
 };
 
@@ -1225,7 +1261,7 @@ useEffect(() => {
       return
     }
     // Сначала сохраняем workflow
-    await handleSave();
+    // await handleSave();
 
     const controller = new AbortController()
     setAbortController(controller)
@@ -1490,6 +1526,14 @@ useEffect(() => {
       <FolderOpen className="h-4 w-4 mr-2" />
       <span>{currentWorkflowName}</span>
     </Button>
+    {currentWorkflowId && (
+           <Badge variant={workflowStatus === 'published' ? 'default' : 'secondary'} className=
+      {workflowStatus === 'published' ? 'bg-green-600' : ''}>
+            {workflowStatus === 'published' ? <CheckCircle className="h-3 w-3 mr-1"/> : <Info 
+      className="h-3 w-3 mr-1"/>}
+            {workflowStatus}
+          </Badge>
+        )}
     <Button variant="ghost" size="sm" onClick={handleNewWorkflow}>
       Создать новый
     </Button>
@@ -1515,10 +1559,31 @@ useEffect(() => {
         Create Webhook
     </Button>
 
-    <Button onClick={handleSave} disabled={nodes.length === 0 || apiStatus === "offline"} size="sm">
+    <Button onClick={handleSave} disabled={isSaving || nodes.length === 0 || apiStatus === "offline"} size="sm">
       <Save className="h-4 w-4 mr-2" />
       {isSaving ? "Сохранение..." : (currentWorkflowId ? "Сохранить" : "Сохранить как...")}
     </Button>
+    {workflowStatus === 'draft' ? (
+          <Button 
+            onClick={handlePublish}
+            disabled={!currentWorkflowId || isSaving || apiStatus === 'offline'}
+            size="sm"
+            className="bg-green-600 hover:bg-green-700 text-white"
+          >
+            <UploadCloud className="h-4 w-4 mr-2" />
+            Опубликовать
+          </Button>
+        ) : (
+          <Button 
+            onClick={handleUnpublish}
+            disabled={!currentWorkflowId || isSaving || apiStatus === 'offline'}
+            size="sm"
+            variant="destructive"
+          >
+            <PowerOff className="h-4 w-4 mr-2" />
+            Снять с публикации
+          </Button>
+        )}
     {isExecuting ? (
       <Button onClick={stopExecution} variant="destructive" size="sm">
         <Square className="h-4 w-4 mr-2" />
@@ -1527,7 +1592,7 @@ useEffect(() => {
       ) : (
       <Button onClick={() =>executeWorkflow()} disabled={nodes.length === 0 || apiStatus === "offline"} size="sm">
         <Play className="h-4 w-4 mr-2" />
-          Выполнить
+          Тест
       </Button>
     )}
   </div>

@@ -24,6 +24,7 @@ export interface NodeData {
     name: string;
     nodes: NodeData[];
     connections: ConnectionData[];
+    status?: 'draft' | 'published';
   }
   
   export interface WorkflowListItem {
@@ -124,18 +125,18 @@ export interface NodeData {
   // ... (другие ваши импорты и функции)
 
 // НОВОЕ: Тип для данных ноды, если он еще не определен глобально
-interface Node {
-  id: string;
-  type: string;
-  position: { x: number; y: number };
-  data: {
-    label: string;
-    config: Record<string, any>;
-  };
-}
+// interface Node {
+//   id: string;
+//   type: string;
+//   position: { x: number; y: number };
+//   data: {
+//     label: string;
+//     config: Record<string, any>;
+//   };
+// }
 
 // НОВОЕ: Функция для вызова эндпоинта настройки таймера
-export const setupTimer = async (node: Node, workflow_id: string): Promise<any> => {
+export const setupTimer = async (node: NodeData, workflow_id: string): Promise<any> => {
   const response = await fetch(`${API_BASE_URL}/setup-timer`, {
     method: 'POST',
     headers: {
@@ -151,5 +152,29 @@ export const setupTimer = async (node: Node, workflow_id: string): Promise<any> 
 
   return response.json();
 };
-
+// --- НОВЫЕ ФУНКЦИИ ДЛЯ ПУБЛИКАЦИИ ---
+ 
+ // Опубликовать воркфлоу
+ export const publishWorkflow = async (id: string) => {
+     const response = await fetch(`${API_BASE_URL}/workflows/${id}/publish`, {
+         method: 'POST',
+     });
+     if (!response.ok) {
+         const error = await response.json();
+         throw new Error(error.detail || "Failed to publish workflow");
+     }
+     return response.json();
+ };
+ 
+ // Снять воркфлоу с публикации
+ export const unpublishWorkflow = async (id: string) => {
+     const response = await fetch(`${API_BASE_URL}/workflows/${id}/unpublish`, {
+         method: 'POST',
+     });
+     if (!response.ok) {
+         const error = await response.json();
+         throw new Error(error.detail || "Failed to unpublish workflow");
+     }
+     return response.json();
+ };
   

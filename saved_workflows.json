@@ -124,7 +124,8 @@
             }
         ],
         "created_at": "2025-06-23T17:57:42.984665",
-        "updated_at": "2025-08-21T17:20:28.411147"
+        "updated_at": "2025-08-26T00:51:40.603811",
+        "status": "draft"
     },
     "main": {
         "name": "main",
@@ -243,7 +244,8 @@
             }
         ],
         "created_at": "2025-06-25T22:06:45.243317",
-        "updated_at": "2025-08-23T23:18:26.181451"
+        "updated_at": "2025-08-26T00:52:33.868972",
+        "status": "draft"
     },
     "sales_consultation": {
         "name": "sales_consultation",
@@ -1388,5 +1390,32 @@
         "connections": [],
         "created_at": "2025-08-24T00:11:15.565218",
         "updated_at": "2025-08-24T00:19:35.134618"
+    },
+    "test_triger_webhook": {
+        "name": "test_triger_webhook",
+        "nodes": [
+            {
+                "id": "node-1756145967276",
+                "type": "webhook_trigger",
+                "position": {
+                    "x": 300.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "Webhook Trigger",
+                    "config": {
+                        "url": "https://api.example.com/webhook",
+                        "method": "POST",
+                        "headers": "Content-Type: application/json",
+                        "webhookId": "f64f709d-e385-464f-bece-52206d6f902a",
+                        "webhookUrl": "http://localhost:8000api/v1/webhooks/f64f709d-e385-464f-bece-52206d6f902a"
+                    }
+                }
+            }
+        ],
+        "connections": [],
+        "created_at": "2025-08-26T01:19:42.757797",
+        "updated_at": "2025-08-26T02:01:05.409469",
+        "status": "draft"
     }
 }

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime
 
 from scripts.models.schemas import SetupTimerRequest
@@ -11,6 +11,8 @@ from scripts.core.timer_manager import (
     delete_timer_by_id,
     execute_timer_now_by_id,
 )
+# Добавляем импорт для доступа к данным воркфлоу
+from scripts.services.storage import get_workflow_by_id
 
 router = APIRouter()
 
@@ -18,10 +20,31 @@ router = APIRouter()
 async def setup_timer(request: SetupTimerRequest):
     node = request.node
     workflow_id = request.workflow_id
-    config = node.data.get('config', {})
-    interval = config.get('interval', 5)
     timer_id = f"workflow_timer_{workflow_id}"
 
+    # Получаем воркфлоу, чтобы проверить его статус
+    workflow = get_workflow_by_id(workflow_id)
+
+    # Если воркфлоу по какой-то причине не найден, удаляем его таймер, если он был
+    if not workflow:
+        if timer_id in active_timers:
+            delete_timer_by_id(timer_id)
+        # Не возвращаем ошибку, просто сообщаем, что таймер не настроен
+        return {"message": f"Workflow {workflow_id} not found, timer setup cancelled."}
+
+    # ГЛАВНАЯ ПРОВЕРКА - "ОХРАННИК"
+    if workflow.get("status") != "published":
+        # Если воркфлоу не опубликован, его таймер не должен быть активен.
+        # Проверяем, есть ли уже активный таймер (например, от предыдущей опубликованной версии)
+        if timer_id in active_timers:
+            delete_timer_by_id(timer_id)
+            return {"message": f"Timer for workflow {workflow_id} has been deactivated because it is not published."}
+        else:
+            return {"message": f"Timer for draft workflow {workflow_id} is not active."}
+
+    # Если мы дошли сюда, значит status == "published", и таймер должен работать
+    config = node.data.get('config', {})
+    interval = config.get('interval', 5)
     workflow_info = {
         "workflow_id": workflow_id,
         "start_node_id": node.id
@@ -29,10 +52,10 @@ async def setup_timer(request: SetupTimerRequest):
 
     if timer_id in active_timers:
         await update_timer(timer_id, interval, workflow_info)
-        return {"message": f"Timer for workflow {workflow_id} updated."}
+        return {"message": f"Timer for published workflow {workflow_id} updated."}
     else:
         await create_timer(timer_id, node.id, interval, workflow_info)
-        return {"message": f"Timer for workflow {workflow_id} created."}
+        return {"message": f"Timer for published workflow {workflow_id} created."}
 
 @router.get("/timers")
 async def get_timers():
