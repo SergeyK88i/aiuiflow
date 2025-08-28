@@ -32,7 +32,6 @@ def clear_node_results(node_ids: List[str]):
             del node_results[node_id]
 
 gigachat_api = GigaChatAPI()
-dispatcher_sessions = {}
 
 async def execute_workflow_internal(
     request: WorkflowExecuteRequest,
@@ -93,9 +92,14 @@ async def execute_workflow_internal(
             if node.type == 'gigachat':
                 result = await executor(node, label_to_id_map, input_data, gigachat_api, all_results)
             elif node.type == 'dispatcher':
-                result = await executor(node, label_to_id_map, input_data, gigachat_api, dispatcher_sessions, all_results)
+                result = await executor(node, label_to_id_map, input_data, gigachat_api, all_results)
             else:
                 result = await executor(node, label_to_id_map, input_data, all_results)
+
+            # --- NEW: Preserve dispatcher_context across nodes ---
+            if 'dispatcher_context' in input_data and 'dispatcher_context' not in result:
+                result['dispatcher_context'] = input_data['dispatcher_context']
+            # --- END NEW ---
 
             all_results[node.id] = result
             executed_nodes.add(node.id)

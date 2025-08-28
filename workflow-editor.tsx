@@ -2758,41 +2758,63 @@ useEffect(() => {
 
       {/* Настройки для orchestrator */}
       {isOrchestrator && (
-  <div>
-    <Label htmlFor="availableWorkflows" className="mb-2 block text-base font-medium">
-      Доступные Workflow для Оркестратора
-    </Label>
-    <div className="flex flex-col gap-2">
-      {workflows.map((wf) => (
-        <label
-          key={wf.id}
-          htmlFor={`workflow-${wf.id}`}
-          className="flex items-center gap-2 p-2 rounded hover:bg-muted transition"
-        >
-          <Checkbox
-            id={`workflow-${wf.id}`}
-            checked={
-              !!(
-                selectedNode.data.config.availableWorkflows &&
-                selectedNode.data.config.availableWorkflows[wf.id] !== undefined
-              )
-            }
-            onCheckedChange={(checked) => {
-              const newAvailableWorkflows = { ...selectedNode.data.config.availableWorkflows };
-              if (checked) {
-                newAvailableWorkflows[wf.id] = { description: wf.name };
-              } else {
-                delete newAvailableWorkflows[wf.id];
-              }
-              updateNodeConfig("availableWorkflows", newAvailableWorkflows);
-            }}
-          />
-          <span className="text-base">{wf.name}</span>
-        </label>
-      ))}
-    </div>
-  </div>
-)}
+     <div>
+       <Label htmlFor="availableWorkflows" className="mb-2 block text-base font-medium">
+         Доступные Workflow для Оркестратора
+       </Label>
+       <p className="text-xs text-muted-foreground mb-2">
+          Выберите sub-workflows и опишите их для AI-планировщика.
+       </p>
+       <div className="flex flex-col gap-2">
+          {workflows.map((wf) => (
+            <div key={wf.id} className="p-2 rounded hover:bg-muted transition border-b last:border-b-0">
+                <div className="flex items-center gap-2">
+                    <Checkbox
+                        id={`workflow-${wf.id}`}
+                        checked={
+                          !!(
+                            selectedNode.data.config.availableWorkflows &&
+                            selectedNode.data.config.availableWorkflows[wf.id] !== undefined
+                          )
+                        }
+                        onCheckedChange={(checked) => {
+                          const newAvailableWorkflows = { ...selectedNode.data.config.availableWorkflows };
+                          if (checked) {
+                            // По умолчанию, используем имя workflow как описание
+                            newAvailableWorkflows[wf.id] = { description: wf.name };
+                          } else {
+                            delete newAvailableWorkflows[wf.id];
+                          }
+                          updateNodeConfig("availableWorkflows", newAvailableWorkflows);
+                        }}
+                    />
+                    <Label htmlFor={`workflow-${wf.id}`} className="text-base font-normal">{wf.name}</Label>
+                </div>
+    
+                {/* Условно показываем поле для ввода описания, только если workflow выбран */}
+                {selectedNode.data.config.availableWorkflows && selectedNode.data.config.availableWorkflows[wf.id] !== undefined && (
+                    <div className="pt-2 pl-7">
+                        <Input
+                            type="text"
+                            placeholder="Описание для AI..."
+                            className="h-10 text-sm"
+                            value={selectedNode.data.config.availableWorkflows[wf.id].description || ''}
+                            onChange={(e) => {
+                                const newAvailableWorkflows = { ...selectedNode.data.config.availableWorkflows };
+                                newAvailableWorkflows[wf.id] = {
+                                    ...newAvailableWorkflows[wf.id],
+                                    description: e.target.value
+                                };
+                                updateNodeConfig("availableWorkflows", newAvailableWorkflows);
+                            }}
+                        />
+                    </div>
+                )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
 
     </div>
   );

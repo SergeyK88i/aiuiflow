@@ -93,3 +93,8 @@ class WebhookInfo(BaseModel):
 class SetupTimerRequest(BaseModel):
     node: Node
     workflow_id: str
+
+# --- НОВАЯ МОДЕЛЬ ДЛЯ КОЛЛБЭКА ДИСПЕТЧЕРА ---
+class DispatcherCallbackRequest(BaseModel):
+    session_id: str
+    step_result: Dict[str, Any]

@@ -144,29 +144,33 @@
                         "dispatcherAuthToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
                         "routes": {
                             "music": {
-                                "workflow_id": "test_gigachat2",
+                                "workflow_id": "sub_find_answer",
                                 "keywords": [
-                                    "музыка"
+                                    "музыка",
+                                    "music"
                                 ],
                                 "description": "Рассказать интересный факт о музыке"
                             },
                             "coding": {
-                                "workflow_id": "test_gigachat",
+                                "workflow_id": "test_gigachat2",
                                 "keywords": [
                                     "программирование"
                                 ],
                                 "description": "Рассказать интересный факт о программировании"
                             }
                         },
-                        "userQueryTemplate": "{{ node-1750708980650.output.query }}",
+                        "userQueryTemplate": "{{ node-1750708980650.output.body.message }}",
                         "dispatcherPrompt": "Ты — умный маршрутизатор. Категории: {категории}. Запрос: {запрос пользователя}. Ответь категорией.\n",
-                        "dispatcherType": "orchestrator",
+                        "dispatcherType": "router",
                         "availableWorkflows": {
+                            "sub_find_answer": {
+                                "description": "все что касается музыки"
+                            },
+                            "sub_format_response": {
+                                "description": "все что касается программирования"
+                            },
                             "test_gigachat": {
                                 "description": "test_gigachat"
-                            },
-                            "test_gigachat2": {
-                                "description": "test_gigachat2"
                             }
                         }
                     }
@@ -185,8 +189,8 @@
                         "url": "https://api.example.com/webhook",
                         "method": "POST",
                         "headers": "Content-Type: application/json",
-                        "webhookId": "6dc6ff51-b009-4662-8d06-88c6ded84158",
-                        "webhookUrl": "http://localhost:8000/webhooks/6dc6ff51-b009-4662-8d06-88c6ded84158"
+                        "webhookId": "f0b41ebc-f125-4800-bbda-20a36892d06c",
+                        "webhookUrl": "http://localhost:8000/api/v1/webhooks/f0b41ebc-f125-4800-bbda-20a36892d06c"
                     }
                 }
             }
@@ -200,7 +204,8 @@
             }
         ],
         "created_at": "2025-06-23T21:15:20.064651",
-        "updated_at": "2025-08-21T17:16:02.767194"
+        "updated_at": "2025-08-28T21:03:05.006788",
+        "status": "published"
     },
     "timer_test_workflow": {
         "name": "Timer Test Workflow",
@@ -780,7 +785,8 @@
             }
         ],
         "created_at": "2025-07-01T00:40:35.830239",
-        "updated_at": "2025-08-25T23:58:08.638748"
+        "updated_at": "2025-08-26T13:35:44.767875",
+        "status": "draft"
     },
     "full_test": {
         "name": "full_test",
@@ -1210,8 +1216,8 @@
                 "id": "node-1752358088342",
                 "type": "gigachat",
                 "position": {
-                    "x": 300.0,
-                    "y": 200.0
+                    "x": 24.0,
+                    "y": 147.0
                 },
                 "data": {
                     "label": "GigaChat AI",
@@ -1223,11 +1229,35 @@
                         "clearHistory": false
                     }
                 }
+            },
+            {
+                "id": "node-1756289197431",
+                "type": "webhook",
+                "position": {
+                    "x": 338.0,
+                    "y": 286.0
+                },
+                "data": {
+                    "label": "Send Webhook",
+                    "config": {
+                        "url": "http://localhost:8000/api/v1/dispatcher/callback",
+                        "method": "POST",
+                        "headers": "Content-Type: application/json",
+                        "bodyTemplate": "{ \n\"session_id\": \"{{input.dispatcher_context.session_id}}\",\n \"step_result\": {{input.json}}\n }"
+                    }
+                }
             }
         ],
-        "connections": [],
+        "connections": [
+            {
+                "id": "node-1752358088342-node-1756289197431-1756289200683",
+                "source": "node-1752358088342",
+                "target": "node-1756289197431",
+                "data": {}
+            }
+        ],
         "created_at": "2025-07-13T01:02:40.460729",
-        "updated_at": "2025-07-13T01:08:13.694496"
+        "updated_at": "2025-08-27T17:08:21.648964"
     },
     "test_gigachat2": {
         "name": "test_gigachat2",
@@ -1236,8 +1266,8 @@
                 "id": "node-1752358100543",
                 "type": "gigachat",
                 "position": {
-                    "x": 300.0,
-                    "y": 200.0
+                    "x": 122.0,
+                    "y": 202.0
                 },
                 "data": {
                     "label": "GigaChat AI",
@@ -1249,11 +1279,35 @@
                         "clearHistory": false
                     }
                 }
+            },
+            {
+                "id": "node-1756289623242",
+                "type": "webhook",
+                "position": {
+                    "x": 601.0,
+                    "y": 247.0
+                },
+                "data": {
+                    "label": "Send Webhook",
+                    "config": {
+                        "url": "http://localhost:8000/api/v1/dispatcher/callback",
+                        "method": "POST",
+                        "headers": "Content-Type: application/json",
+                        "bodyTemplate": "{ \n\"session_id\": \"{{input.dispatcher_context.session_id}}\",\n \"step_result\": {{input.json}}\n }"
+                    }
+                }
             }
         ],
-        "connections": [],
+        "connections": [
+            {
+                "id": "node-1752358100543-node-1756289623242-1756289627245",
+                "source": "node-1752358100543",
+                "target": "node-1756289623242",
+                "data": {}
+            }
+        ],
         "created_at": "2025-07-13T01:03:01.900059",
-        "updated_at": "2025-07-27T00:52:28.666920"
+        "updated_at": "2025-08-27T17:14:19.411328"
     },
     "loop": {
         "name": "тестируемLoop",
@@ -1415,7 +1469,109 @@
         ],
         "connections": [],
         "created_at": "2025-08-26T01:19:42.757797",
-        "updated_at": "2025-08-26T02:01:05.409469",
+        "updated_at": "2025-08-26T13:35:17.767866",
+        "status": "published"
+    },
+    "sub_find_answer": {
+        "name": "sub_find_answer",
+        "nodes": [
+            {
+                "id": "node-1752358088342",
+                "type": "gigachat",
+                "position": {
+                    "x": 24.0,
+                    "y": 147.0
+                },
+                "data": {
+                    "label": "GigaChat AI",
+                    "config": {
+                        "role": "assistant",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
+                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
+                        "userMessage": "Ответь одним словом на вопрос: {{input.body.question}}",
+                        "clearHistory": false
+                    }
+                }
+            },
+            {
+                "id": "node-1756289197431",
+                "type": "webhook",
+                "position": {
+                    "x": 338.0,
+                    "y": 286.0
+                },
+                "data": {
+                    "label": "Send Webhook",
+                    "config": {
+                        "url": "http://localhost:8000/api/v1/dispatcher/callback",
+                        "method": "POST",
+                        "headers": "Content-Type: application/json",
+                        "bodyTemplate": "{ \n\"session_id\": \"{{input.dispatcher_context.session_id}}\",\n \"step_result\": {{input}}\n }"
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "node-1752358088342-node-1756289197431-1756289200683",
+                "source": "node-1752358088342",
+                "target": "node-1756289197431",
+                "data": {}
+            }
+        ],
+        "created_at": "2025-08-27T18:06:27.579597",
+        "updated_at": "2025-08-27T23:07:17.018977",
+        "status": "draft"
+    },
+    "sub_format_response": {
+        "name": "sub_format_response",
+        "nodes": [
+            {
+                "id": "node-1752358088342",
+                "type": "gigachat",
+                "position": {
+                    "x": 24.0,
+                    "y": 147.0
+                },
+                "data": {
+                    "label": "GigaChat AI",
+                    "config": {
+                        "role": "assistant",
+                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
+                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
+                        "userMessage": "Напиши вежливый и полный ответ на основе этого факта: \n             {{input.last_step_result.text}}",
+                        "clearHistory": false
+                    }
+                }
+            },
+            {
+                "id": "node-1756289197431",
+                "type": "webhook",
+                "position": {
+                    "x": 338.0,
+                    "y": 286.0
+                },
+                "data": {
+                    "label": "Send Webhook",
+                    "config": {
+                        "url": "http://localhost:8000/api/v1/dispatcher/callback",
+                        "method": "POST",
+                        "headers": "Content-Type: application/json",
+                        "bodyTemplate": "{ \n\"session_id\": \"{{input.dispatcher_context.session_id}}\",\n \"step_result\": {{input}}\n }"
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "node-1752358088342-node-1756289197431-1756289200683",
+                "source": "node-1752358088342",
+                "target": "node-1756289197431",
+                "data": {}
+            }
+        ],
+        "created_at": "2025-08-27T18:09:03.692608",
+        "updated_at": "2025-08-27T23:42:12.916253",
         "status": "draft"
     }
 }

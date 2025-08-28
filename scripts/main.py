@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from starlette.background import BackgroundTasks
 
-from scripts.api.v1 import workflows, execution, timers, webhooks
+from scripts.api.v1 import workflows, execution, timers, webhooks, dispatcher_callback
 from scripts.services.storage import load_workflows_from_disk
 
 # Настройка логирования
@@ -27,7 +27,8 @@ app.add_middleware(
 app.include_router(workflows.router, prefix="/api/v1", tags=["Workflows"])
 app.include_router(execution.router, prefix="/api/v1", tags=["Execution"])
 app.include_router(timers.router, prefix="/api/v1", tags=["Timers"])
-app.include_router(webhooks.router, prefix="/api/v1", tags=["Webhooks"]) # <--- ДОБАВЛЕНО
+app.include_router(webhooks.router, prefix="/api/v1", tags=["Webhooks"])
+app.include_router(dispatcher_callback.router, prefix="/api/v1", tags=["Dispatcher"])
 
 @app.on_event("startup")
 def on_startup():
