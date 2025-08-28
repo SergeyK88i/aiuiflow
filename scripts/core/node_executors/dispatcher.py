@@ -180,15 +180,23 @@ async def execute_router_dispatcher(node: Node, label_to_id_map: Dict[str, str],
         if not auth_token:
             raise Exception("Dispatcher: GigaChat auth token is required for AI mode.")
 
-        dispatcher_prompt = config.get('dispatcherPrompt', "Определи категорию запроса: {категории}. Запрос: {запрос пользователя}. Ответь одним словом.")
+        dispatcher_prompt = config.get('dispatcherPrompt') or "Определи категорию запроса: {категории}. Запрос: {запрос пользователя}. Ответь одним словом."
         categories_str = ", ".join(workflow_routes.keys())
         classification_prompt = dispatcher_prompt.replace("{категории}", categories_str).replace("{запрос пользователя}", user_query)
+        logger.info(f"AI classification prompt:\n{classification_prompt}")
         
         if await gigachat_api.get_token(auth_token):
             gigachat_result = await gigachat_api.get_chat_completion("Ты - классификатор запросов.", classification_prompt)
-            response_text = gigachat_result.get('response', 'default').strip().lower()
-            if response_text in workflow_routes:
-                category = response_text
+            
+            # NEW: Проверяем, что вызов API был успешным
+            if gigachat_result and gigachat_result.get('success'):
+                response_text = gigachat_result.get('response', 'default').strip().lower()
+                if response_text in workflow_routes:
+                    category = response_text
+            else:
+                # NEW: Если API вернул ошибку, логируем ее и используем 'default'
+                logger.error(f"GigaChat API call failed: {gigachat_result.get('error')}. Falling back to 'default' category.")
+                # category уже 'default', так что дополнительных действий не нужно
         else:
              logger.error("Dispatcher: Failed to get GigaChat token.")
     else:
