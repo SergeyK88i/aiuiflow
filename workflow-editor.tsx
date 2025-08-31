@@ -2759,6 +2759,23 @@ useEffect(() => {
       {/* Настройки для orchestrator */}
       {isOrchestrator && (
      <div>
+      <div className="flex items-center space-x-2 pt-4">
+     <Switch
+       id="is_agent_mode"
+       checked={selectedNode.data.config.is_agent_mode || false}
+       onCheckedChange={(isChecked) => {
+         // Используем существующую функцию, передавая имя поля и значение
+         updateNodeConfig("is_agent_mode", isChecked);
+        }}
+      />
+      <Label htmlFor="is_agent_mode">
+        Включить режим Агента (динамическое перепланирование)
+      </Label>
+    </div>
+    <p className="text-xs text-gray-500 mt-1">
+      Если включено, оркестратор будет переоценивать план после каждого шага.
+    </p>
+
        <Label htmlFor="availableWorkflows" className="mb-2 block text-base font-medium">
          Доступные Workflow для Оркестратора
        </Label>

@@ -3,6 +3,7 @@ import json
 from typing import Dict, Any
 import uuid
 from datetime import datetime
+import re
 
 from scripts.models.schemas import Node, WorkflowExecuteRequest, DispatcherCallbackRequest
 from scripts.services.giga_chat import GigaChatAPI
@@ -39,6 +40,97 @@ async def launch_workflow_by_id(workflow_id: str, input_data: Dict[str, Any]):
     # на эндпоинт /dispatcher/callback, а не просто вернуться.
     return result
 
+async def re_plan_in_memory(session: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Analyzes the current state of a session and creates a new plan.
+    This is the 'brain' of the agent mode.
+    """
+    logger.info(f"🧠 Agent is re-planning for session {session.get('dispatcher_id')}")
+    
+    config = session.get("dispatcher_config", {})
+    initial_query = session.get("initial_query", "")
+    history = session.get("execution_history", [])
+
+    # 1. Instantiate a GigaChat API client
+    gigachat_api = GigaChatAPI()
+    auth_token = config.get('dispatcherAuthToken', '')
+    if not auth_token:
+        raise Exception("Auth token for dispatcher not found in session config.")
+
+    # 2. Format the history for the prompt
+    history_str = ""
+    for i, record in enumerate(history):
+        step_info = record.get("step_info", {})
+        result = record.get("result", {})
+        history_str += f"Шаг {i+1}: Я выполнил воркфлоу `{step_info.get('workflow_id')}` с описанием `{step_info.get('description')}`.\n"
+        history_str += f"Результат: {json.dumps(result, ensure_ascii=False, indent=2)}\n\n"
+
+    # 3. Get available workflows from the stored config
+    available_workflows = config.get('availableWorkflows', {})
+    if not available_workflows:
+         # If there are no tools, we can't make a new plan.
+        logger.warning("No available workflows found in dispatcher config for re-planning. Aborting.")
+        session['plan'] = []
+        return session
+
+    workflows_description = "\n".join([
+        f"- {wf_id}: {wf_config.get('description', 'Описание отсутствует')}"
+        for wf_id, wf_config in available_workflows.items()
+    ])
+
+    # 4. Build the re-planning prompt
+    re_planning_prompt = f"""
+===Изиагада задача ===
+{initial_query}
+
+===Что уже сделано (История выполнения) ===
+{history_str if history_str else "Еще ничего не сделано."} 
+
+===Доступные инструменты (воркфлоу) для следущего шага ===
+{workflows_description}
+
+===Новая инструкция ===
+Основываясь на изизагадада задачу и истории выполненных шагов, реши, какой должен быть следующий шаг.
+Создай ОБНОВЛЕННЫЙ И ПОЛНЫЙ план оставшихся действий в формате JSON массива вида [{{"workflow_id": "id", "description": "desc"}}].
+- Если задача уже решена, верни пустой массив [].
+- Если следующий шаг очевиден, верни план из одного этого шага.
+- Если задача сложная, разбей ее на несколько шагов.
+- Используй только инструменты из списка доступных.
+Отвечай ТОЛЬКО JSON массивом, без дополнительного текста.
+"""
+    logger.info(f"🤖 Re-planning prompt for GigaChat:\n{re_planning_prompt}")
+
+    # 5. Call GigaChat to get the new plan
+    if await gigachat_api.get_token(auth_token):
+        result = await gigachat_api.get_chat_completion(
+            "You are an advanced AI agent that analyzes completed work and plans the next steps.",
+            re_planning_prompt
+        )
+        try:
+            # Clean up potential markdown code blocks
+            raw_response_text = result.get('response', '[]')
+            match = re.search(r'```(json)?\s*([\s\S]*?)\s*```', raw_response_text)
+            if match:
+                cleaned_response_text = match.group(2)
+            else:
+                cleaned_response_text = raw_response_text
+
+            new_plan = json.loads(cleaned_response_text)
+            if not isinstance(new_plan, list):
+                raise ValueError("New plan must be a list.")
+            
+            logger.info(f"✅ Agent received a new plan with {len(new_plan)} steps.")
+            session['plan'] = new_plan
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Error parsing new plan from LLM: {result.get('response')}. Error: {e}")
+            # On failure, abort by returning an empty plan.
+            session['plan'] = []
+    else:
+        raise Exception("Failed to get GigaChat token for re-planning.")
+
+    return session
+
+
 async def handle_workflow_return(dispatcher_id: str, sessions: Dict, input_data: Dict[str, Any]):
     """Обрабатывает возврат от workflow"""
     session_id = input_data.get('session_id')
@@ -46,39 +138,57 @@ async def handle_workflow_return(dispatcher_id: str, sessions: Dict, input_data:
         raise Exception(f"Сессия {session_id} не найдена в диспетчере {dispatcher_id}")
     
     session = sessions[session_id]
-    session['accumulated_data'][f"step_{session['current_step']}_result"] = input_data.get('workflow_result', {})
-    session['current_step'] += 1
     
+    # Save result of the completed step to the history
     if session['current_step'] < len(session['plan']):
-        next_step = session['plan'][session['current_step']]
-        next_workflow_id = next_step.get('workflow_id')
-        logger.info(f"➡️ Переход к шагу {session['current_step']}: {next_workflow_id}")
-        
-        # Get the result of the step that just finished
-        last_step_index = session['current_step'] - 1
-        last_step_result = session['accumulated_data'].get(f"step_{last_step_index}_result", {})
+        completed_step_info = session['plan'][session['current_step']]
+        step_result = input_data.get('workflow_result', {})
+        session['execution_history'].append({
+            "step_info": completed_step_info,
+            "result": step_result,
+            "timestamp": datetime.now().isoformat()
+        })
 
-        workflow_input = {
-            "user_query": session['user_query'],
-            "previous_results": session['accumulated_data'],
-            "last_step_result": last_step_result, # NEW
-            "dispatcher_context": {
-                "session_id": session_id,
-                "plan": session['plan'],
-                "step": session['current_step'],
-                "dispatcher_id": dispatcher_id
-            }
-        }
-        return await launch_workflow_by_id(next_workflow_id, workflow_input)
+    # Check for agent mode and re-plan if enabled
+    if session.get('is_agent_mode', False):
+        logger.info(f"Agent mode enabled for session {session_id}. Re-planning...")
+        session = await re_plan_in_memory(session)
+        # After re-planning, we start from the beginning of the new plan
+        session['current_step'] = 0
     else:
+        # In simple orchestrator mode, just move to the next step
+        session['current_step'] += 1
+    
+    # Check if the plan is complete
+    if session['current_step'] >= len(session['plan']):
         logger.info(f"✅ План для сессии {session_id} выполнен полностью")
         final_result = {
             "success": True,
             "message": "План выполнен успешно",
-            "results": session['accumulated_data']
+            "results": session['execution_history'] # Return the full history
         }
         del sessions[session_id]
         return final_result
+
+    # Launch the next step
+    next_step = session['plan'][session['current_step']]
+    next_workflow_id = next_step.get('workflow_id')
+    logger.info(f"➡️ Переход к шагу {session['current_step']}: {next_workflow_id}")
+    
+    last_step_result = session['execution_history'][-1]['result'] if session['execution_history'] else {}
+
+    workflow_input = {
+        "initial_query": session.get('initial_query', ''),
+        "execution_history": session['execution_history'],
+        "last_step_result": last_step_result,
+        "dispatcher_context": {
+            "session_id": session_id,
+            "plan": session['plan'],
+            "step": session['current_step'],
+            "dispatcher_id": dispatcher_id
+        }
+    }
+    return await launch_workflow_by_id(next_workflow_id, workflow_input)
 
 async def create_execution_plan(config: Dict, user_query: str, gigachat_api: GigaChatAPI):
     """Создает план выполнения через GigaChat"""
@@ -138,8 +248,11 @@ async def create_new_orchestrator_session(dispatcher_id: str, sessions: Dict, co
     sessions[session_id] = {
         "plan": plan,
         "current_step": 0,
-        "user_query": user_query,
-        "accumulated_data": {},
+        "initial_query": user_query,
+        "execution_history": [],
+        "is_agent_mode": config.get('is_agent_mode', False),
+        "dispatcher_config": config, # Store node config for re-planning
+        "accumulated_data": {}, # Maintained for compatibility, may be deprecated
         "created_at": datetime.now(),
         "dispatcher_id": dispatcher_id
     }
