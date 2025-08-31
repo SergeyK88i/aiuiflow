@@ -261,8 +261,11 @@ async def create_new_orchestrator_session(dispatcher_id: str, sessions: Dict, co
         first_step = plan[0]
         workflow_id = first_step.get('workflow_id')
         if workflow_id:
+            # Create the standardized input context for the first step
             workflow_input = {
-                **input_data,
+                "initial_query": user_query,
+                "last_step_result": {},  # Exists, but is empty
+                "execution_history": [],   # Exists, but is empty
                 "dispatcher_context": {
                     "session_id": session_id,
                     "plan": plan,

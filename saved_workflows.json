@@ -675,7 +675,7 @@
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "твоя задача выбрать ОДИН  все get запросы из предложенного массив и в ответе вернуть вот  json, кроме json больше нечего не пиши\n[\n  {\n    \"endpoint\": \"/users/1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/posts\",\n    \"method\": \"POST\",\n    \"body\": {\n      \"title\": \"Test\",\n      \"body\": \"Hello\",\n      \"userId\": 1\n    }\n  },\n  {\n    \"endpoint\": \"/comments?postId=1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/todos/5\",\n    \"method\": \"PATCH\",\n    \"body\": {\n      \"completed\": true\n    }\n  },\n  {\n    \"endpoint\": \"/albums\",\n    \"method\": \"GET\"\n  }\n]\n",
                         "clearHistory": false
@@ -759,7 +759,7 @@
             }
         ],
         "created_at": "2025-07-01T20:34:28.349334",
-        "updated_at": "2025-08-03T19:58:09.931389"
+        "updated_at": "2025-08-31T23:40:50.812494"
     },
     "full_test_": {
         "name": "full_test (копия)",
@@ -817,14 +817,14 @@
                 "id": "node-1751702932946",
                 "type": "gigachat",
                 "position": {
-                    "x": 111.0,
-                    "y": 369.0
+                    "x": 277.0,
+                    "y": 87.0
                 },
                 "data": {
-                    "label": "GigaChat AI",
+                    "label": "Giga",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "назови число от 1 до 5, у тебя в ответе должна быть просто цифра",
                         "clearHistory": false
@@ -835,14 +835,14 @@
                 "id": "node-1751702939141",
                 "type": "if_else",
                 "position": {
-                    "x": 442.0,
-                    "y": 206.0
+                    "x": 604.0,
+                    "y": 105.0
                 },
                 "data": {
                     "label": "If/Else",
                     "config": {
                         "conditionType": "equals",
-                        "fieldPath": "node-1751702932946.text",
+                        "fieldPath": "Giga.text",
                         "compareValue": "10",
                         "caseSensitive": false,
                         "enableGoto": false,
@@ -854,14 +854,14 @@
                 "id": "node-1751703106357",
                 "type": "gigachat",
                 "position": {
-                    "x": 782.0,
-                    "y": 279.0
+                    "x": 865.0,
+                    "y": 236.0
                 },
                 "data": {
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "Привет! Расскажи что-нибудь интересное о программировании.",
                         "clearHistory": false
@@ -869,16 +869,16 @@
                 }
             },
             {
-                "id": "node-1751704302497",
+                "id": "node-1756658611156",
                 "type": "timer",
                 "position": {
-                    "x": 75.0,
-                    "y": 639.0
+                    "x": 16.0,
+                    "y": 354.0
                 },
                 "data": {
                     "label": "Timer Trigger",
                     "config": {
-                        "interval": "1",
+                        "interval": 5,
                         "timezone": "UTC"
                     }
                 }
@@ -889,12 +889,6 @@
                 "id": "node-1751702932946-node-1751702939141-1751702948626",
                 "source": "node-1751702932946",
                 "target": "node-1751702939141",
-                "data": {}
-            },
-            {
-                "id": "node-1751704302497-node-1751702932946-1751704306131",
-                "source": "node-1751704302497",
-                "target": "node-1751702932946",
                 "data": {}
             },
             {
@@ -912,10 +906,16 @@
                 "data": {
                     "label": "false:goto"
                 }
+            },
+            {
+                "id": "node-1756658611156-node-1751702932946-1756658615240",
+                "source": "node-1756658611156",
+                "target": "node-1751702932946",
+                "data": {}
             }
         ],
         "created_at": "2025-07-05T11:36:40.827026",
-        "updated_at": "2025-08-25T23:58:20.281266"
+        "updated_at": "2025-08-31T23:56:27.436676"
     },
     "telegram_ai": {
         "name": "telegram_ai",
