@@ -132,6 +132,12 @@ async def execute_workflow_internal(
                                     if goto_counts[goto_key] > max_gotos:
                                         raise Exception(f"GOTO limit ({max_gotos}) exceeded for {goto_key}")
                                     logger.info(f"↪️ GOTO: Jumping from {conn.source} to {conn.target} (iteration {goto_counts[goto_key]})")
+                                    
+                                    # Allow the target node and the If/Else node itself to be re-executed
+                                    if conn.target in executed_nodes:
+                                        executed_nodes.remove(conn.target)
+                                    if conn.source in executed_nodes:
+                                        executed_nodes.remove(conn.source)
                                 
                                 next_nodes.append((conn.target, result))
             else:
