@@ -1532,8 +1532,7 @@ useEffect(() => {
         onCreate={handleCreateWorkflow}
         onDelete={handleDeleteWorkflow}
         onClone={handleCloneWorkflow}
-      />
-    
+      /> 
       {/* Header */}
       <header className="p-2 border-b flex items-center justify-between bg-card shrink-0">
         <div className="flex items-center gap-4">
@@ -2889,7 +2888,7 @@ useEffect(() => {
                           rows={5}
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          JSON-объект с параметрами. Поддерживает шаблоны `{{...}}`.
+                          {'JSON-объект с параметрами. Поддерживает шаблоны `{{...}}`.'}
                         </p>
                       </div>
                     </>
