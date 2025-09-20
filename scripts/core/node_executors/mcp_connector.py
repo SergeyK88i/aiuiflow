@@ -16,16 +16,18 @@ async def execute_mcp_connector(node: Node, label_to_id_map: Dict[str, str], inp
     config = node.data.get('config', {})
     logger.info(f"🔌 Executing MCP Connector node: {node.id}")
 
-    # 1. Получаем настройки из ноды
-    server_url = config.get('mcp_server_url', '').rstrip('/')
-    function_name = config.get('mcp_function_name')
+    # 1. Получаем шаблоны настроек из ноды
+    server_url_template = config.get('mcp_server_url', '')
+    function_name_template = config.get('mcp_function_name')
     parameters_template = config.get('mcp_parameters', '{}')
 
-    if not server_url or not function_name:
-        raise Exception("MCP Connector: 'Server URL' and 'Function Name' are required.")
-
-    # 2. Заполняем шаблоны в параметрах
+    # 2. Заполняем шаблоны для всех полей
+    server_url = replace_templates(server_url_template, input_data, label_to_id_map, all_results).rstrip('/')
+    function_name = replace_templates(function_name_template, input_data, label_to_id_map, all_results)
     resolved_params_str = replace_templates(parameters_template, input_data, label_to_id_map, all_results)
+
+    if not server_url or not function_name:
+        raise Exception("MCP Connector: 'Server URL' and 'Function Name' are required after template replacement.")
     try:
         final_parameters = json.loads(resolved_params_str)
     except json.JSONDecodeError:
