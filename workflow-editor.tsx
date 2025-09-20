@@ -121,7 +121,7 @@ const nodeTypes = [
   { type: "database", label: "Database Query", icon: Database, color: "bg-purple-500", canStart: false },
   { type: "join", label: "Join/Merge", icon: GitMerge, color: "bg-yellow-500", canStart: false },
   { type: "request_iterator", label: "Request Iterator", icon: ListChecks, color: "bg-teal-500", canStart: false },
-  {type: "if_else",label: "If/Else",icon: GitBranch, color: "bg-purple-500",description: "Условное ветвление с поддержкой циклов"},
+  { type: "if_else",label: "If/Else",icon: GitBranch, color: "bg-purple-500",description: "Условное ветвление с поддержкой циклов"},
   { type: "loop", label: "Loop", icon: HopIcon , color: "blue" },
   // НОВОЕ: Добавляем ноду Диспетчер
   { 
@@ -131,7 +131,21 @@ const nodeTypes = [
     color: "bg-indigo-500", 
     canStart: false 
   },
-  ];
+  {
+    type: "mcp_connector",
+    label: "MCP Connector",
+    icon: UploadCloud, // Иконка для связи с "облачным" инструментом
+    color: "bg-sky-500",
+    canStart: false
+  },
+  {
+    type: "filesystem",
+    label: "File System",
+    icon: Save, // Иконка сохранения
+    color: "bg-slate-500",
+    canStart: false
+  },
+];
   
   
 // Добавьте после импортов (примерно строка 30)
@@ -1519,84 +1533,85 @@ useEffect(() => {
         onDelete={handleDeleteWorkflow}
         onClone={handleCloneWorkflow}
       />
+    
       {/* Header */}
       <header className="p-2 border-b flex items-center justify-between bg-card shrink-0">
-  <div className="flex items-center gap-4">
-    <Button variant="outline" onClick={() => setWorkflowModalOpen(true)} size="sm">
-      <FolderOpen className="h-4 w-4 mr-2" />
-      <span>{currentWorkflowName}</span>
-    </Button>
-    {currentWorkflowId && (
-           <Badge variant={workflowStatus === 'published' ? 'default' : 'secondary'} className=
-      {workflowStatus === 'published' ? 'bg-green-600' : ''}>
-            {workflowStatus === 'published' ? <CheckCircle className="h-3 w-3 mr-1"/> : <Info 
-      className="h-3 w-3 mr-1"/>}
-            {workflowStatus}
+        <div className="flex items-center gap-4">
+          <Button variant="outline" onClick={() => setWorkflowModalOpen(true)} size="sm">
+            <FolderOpen className="h-4 w-4 mr-2" />
+            <span>{currentWorkflowName}</span>
+          </Button>
+          {currentWorkflowId && (
+              <Badge variant={workflowStatus === 'published' ? 'default' : 'secondary'} className=
+                {workflowStatus === 'published' ? 'bg-green-600' : ''}>
+                {workflowStatus === 'published' ? <CheckCircle className="h-3 w-3 mr-1"/> : <Info 
+                  className="h-3 w-3 mr-1"/>}
+                {workflowStatus}
+              </Badge>
+            )}
+          <Button variant="ghost" size="sm" onClick={handleNewWorkflow}>
+            Создать новый
+          </Button>
+          <Badge variant="secondary">{nodes.length} nodes</Badge>
+          <Badge variant={apiStatus === "online" ? "default" : "destructive"}>
+            API: {apiStatus}
           </Badge>
-        )}
-    <Button variant="ghost" size="sm" onClick={handleNewWorkflow}>
-      Создать новый
-    </Button>
-    <Badge variant="secondary">{nodes.length} nodes</Badge>
-    <Badge variant={apiStatus === "online" ? "default" : "destructive"}>
-       API: {apiStatus}
-    </Badge>
-  </div>
+        </div>
 
-  <div className="flex items-center gap-2">
-    <Button variant="outline" size="sm" onClick={checkApiStatus}>
-      <ExternalLink className="h-4 w-4 mr-2" />
-      Check API
-    </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={checkApiStatus}>
+            <ExternalLink className="h-4 w-4 mr-2" />
+              Check API
+            </Button>
 
-    <Button 
-      variant="outline" 
-      size="sm" 
-      onClick={createWebhook}
-      disabled={nodes.length === 0 || !nodes.some(n => n.type === "webhook_trigger") || apiStatus === "offline"}
-    >
-      <Webhook className="w-4 h-4 mr-2" />
-        Create Webhook
-    </Button>
-
-    <Button onClick={handleSave} disabled={isSaving || nodes.length === 0 || apiStatus === "offline"} size="sm">
-      <Save className="h-4 w-4 mr-2" />
-      {isSaving ? "Сохранение..." : (currentWorkflowId ? "Сохранить" : "Сохранить как...")}
-    </Button>
-    {workflowStatus === 'draft' ? (
           <Button 
-            onClick={handlePublish}
-            disabled={!currentWorkflowId || isSaving || apiStatus === 'offline'}
-            size="sm"
-            className="bg-green-600 hover:bg-green-700 text-white"
+            variant="outline" 
+            size="sm" 
+            onClick={createWebhook}
+            disabled={nodes.length === 0 || !nodes.some(n => n.type === "webhook_trigger") || apiStatus === "offline"}
           >
-            <UploadCloud className="h-4 w-4 mr-2" />
-            Опубликовать
+          <Webhook className="w-4 h-4 mr-2" />
+            Create Webhook
           </Button>
-        ) : (
-          <Button 
-            onClick={handleUnpublish}
-            disabled={!currentWorkflowId || isSaving || apiStatus === 'offline'}
-            size="sm"
-            variant="destructive"
-          >
-            <PowerOff className="h-4 w-4 mr-2" />
-            Снять с публикации
+
+          <Button onClick={handleSave} disabled={isSaving || nodes.length === 0 || apiStatus === "offline"} size="sm">
+            <Save className="h-4 w-4 mr-2" />
+            {isSaving ? "Сохранение..." : (currentWorkflowId ? "Сохранить" : "Сохранить как...")}
           </Button>
-        )}
-    {isExecuting ? (
-      <Button onClick={stopExecution} variant="destructive" size="sm">
-        <Square className="h-4 w-4 mr-2" />
-          Stop
-      </Button>
-      ) : (
-      <Button onClick={() =>executeWorkflow()} disabled={nodes.length === 0 || apiStatus === "offline"} size="sm">
-        <Play className="h-4 w-4 mr-2" />
-          Тест
-      </Button>
-    )}
-  </div>
-</header>
+          {workflowStatus === 'draft' ? (
+            <Button 
+              onClick={handlePublish}
+              disabled={!currentWorkflowId || isSaving || apiStatus === 'offline'}
+              size="sm"
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              <UploadCloud className="h-4 w-4 mr-2" />
+              Опубликовать
+            </Button>
+            ) : (
+            <Button 
+              onClick={handleUnpublish}
+              disabled={!currentWorkflowId || isSaving || apiStatus === 'offline'}
+              size="sm"
+              variant="destructive"
+            >
+              <PowerOff className="h-4 w-4 mr-2" />
+              Снять с публикации
+            </Button>
+          )}
+          {isExecuting ? (
+            <Button onClick={stopExecution} variant="destructive" size="sm">
+            <Square className="h-4 w-4 mr-2" />
+              Stop
+            </Button>
+          ) : (
+            <Button onClick={() =>executeWorkflow()} disabled={nodes.length === 0 || apiStatus === "offline"} size="sm">
+            <Play className="h-4 w-4 mr-2" />
+              Тест
+            </Button>
+          )}
+        </div>
+      </header>
 
       {/* API Status Alert */}
       {apiStatus === "offline" && (
@@ -1884,40 +1899,40 @@ useEffect(() => {
                     </>
                   )}
                   {selectedNode.type === "loop" && (
-  <>
-    <div>
-      <Label htmlFor="inputArrayPath">Путь к массиву</Label>
-      <Input
-        id="inputArrayPath"
-        value={selectedNode.data.config.inputArrayPath || ""}
-        onChange={e => updateNodeConfig("inputArrayPath", e.target.value)}
-        placeholder="node-id.json или label.json"
-      />
-      <p className="text-xs text-gray-500 mt-1">
-        Укажите путь к массиву данных, например: <code>gigachat.json</code> или <code>node-123.json</code>
-      </p>
-    </div>
+                  <>
+                  <div>
+                    <Label htmlFor="inputArrayPath">Путь к массиву</Label>
+                    <Input
+                      id="inputArrayPath"
+                      value={selectedNode.data.config.inputArrayPath || ""}
+                      onChange={e => updateNodeConfig("inputArrayPath", e.target.value)}
+                      placeholder="node-id.json или label.json"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Укажите путь к массиву данных, например: <code>gigachat.json</code> или <code>node-123.json</code>
+                    </p>
+                  </div>
     
-    <div className="mt-4">
-      <Label htmlFor="subWorkflowId">Подпроцесс (Sub-workflow)</Label>
-      <Select
-        value={selectedNode.data.config.subWorkflowId || ""}
-        onValueChange={value => updateNodeConfig("subWorkflowId", value)}
-      >
-        <SelectTrigger id="subWorkflowId">
-          <SelectValue placeholder="Выберите workflow..." />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="placeholder">Выберите workflow...</SelectItem>
-          {workflows.map(wf => (
-            <SelectItem key={wf.id} value={wf.id}>{wf.name}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <p className="text-xs text-gray-500 mt-1">
-        Workflow, который будет выполнен для каждого элемента массива
-      </p>
-    </div>
+          <div className="mt-4">
+            <Label htmlFor="subWorkflowId">Подпроцесс (Sub-workflow)</Label>
+            <Select
+              value={selectedNode.data.config.subWorkflowId || ""}
+              onValueChange={value => updateNodeConfig("subWorkflowId", value)}
+            >
+              <SelectTrigger id="subWorkflowId">
+                <SelectValue placeholder="Выберите workflow..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="placeholder">Выберите workflow...</SelectItem>
+                {workflows.map(wf => (
+                  <SelectItem key={wf.id} value={wf.id}>{wf.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-gray-500 mt-1">
+              Workflow, который будет выполнен для каждого элемента массива
+            </p>
+          </div>
     
     <div className="mt-4">
       <Label htmlFor="executionMode">Режим выполнения</Label>
@@ -1957,10 +1972,10 @@ useEffect(() => {
           Ограничивает количество одновременно выполняемых задач (1-20)
         </p>
       </div>
-    )}
+      )}
     
-    {/* Пакетная обработка */}
-    <div className="mt-4">
+      {/* Пакетная обработка */}
+      <div className="mt-4">
       <div className="flex items-center space-x-2">
         <Switch
           id="enableBatching"
@@ -1974,10 +1989,10 @@ useEffect(() => {
       <p className="text-xs text-gray-500 mt-1">
         Обрабатывать большие массивы по частям для экономии ресурсов
       </p>
-    </div>
+      </div>
     
-    {/* Размер пакета */}
-    {selectedNode.data.config.batchSize > 0 && (
+      {/* Размер пакета */}
+      {selectedNode.data.config.batchSize > 0 && (
       <div className="mt-2">
         <Label htmlFor="batchSize">Размер пакета</Label>
         <Input
@@ -1992,10 +2007,10 @@ useEffect(() => {
           Количество элементов, обрабатываемых за один раз
         </p>
       </div>
-    )}
+      )}
     
-    {/* Таймаут */}
-    <div className="mt-4">
+      {/* Таймаут */}
+      <div className="mt-4">
       <Label htmlFor="timeout">Таймаут (секунды)</Label>
       <Input
         id="timeout"
@@ -2008,10 +2023,10 @@ useEffect(() => {
       <p className="text-xs text-gray-500 mt-1">
         Максимальное время выполнения для каждого элемента (10-3600 сек)
       </p>
-    </div>
+      </div>
     
-    {/* Пропускать ошибки */}
-    <div className="mt-4">
+      {/* Пропускать ошибки */}
+      <div className="mt-4">
       <div className="flex items-center space-x-2">
         <Switch
           id="skipErrors"
@@ -2023,23 +2038,23 @@ useEffect(() => {
       <p className="text-xs text-gray-500 mt-1">
         Если включено, обработка продолжится даже при ошибках в отдельных элементах
       </p>
-    </div>
+      </div>
     
-    {/* Информационная панель */}
-    <Alert className="mt-6">
-      <Info className="h-4 w-4" />
-      <AlertDescription className="text-xs">
-        <p className="font-medium mb-1">Как использовать Loop:</p>
-        <ol className="list-decimal pl-4 space-y-1">
-          <li>Укажите путь к массиву данных (например, <code>gigachat.json</code>)</li>
-          <li>Выберите workflow, который будет запущен для каждого элемента</li>
-          <li>В подпроцессе используйте <code>{"{{item}}"}</code> для доступа к текущему элементу</li>
-          <li>Используйте <code>{"{{loop_index}}"}</code> для доступа к индексу элемента</li>
-        </ol>
-      </AlertDescription>
-    </Alert>
-  </>
-)}
+      {/* Информационная панель */}
+      <Alert className="mt-6">
+        <Info className="h-4 w-4" />
+        <AlertDescription className="text-xs">
+          <p className="font-medium mb-1">Как использовать Loop:</p>
+          <ol className="list-decimal pl-4 space-y-1">
+            <li>Укажите путь к массиву данных (например, <code>gigachat.json</code>)</li>
+            <li>Выберите workflow, который будет запущен для каждого элемента</li>
+            <li>В подпроцессе используйте <code>{"{{item}}"}</code> для доступа к текущему элементу</li>
+            <li>Используйте <code>{"{{loop_index}}"}</code> для доступа к индексу элемента</li>
+          </ol>
+        </AlertDescription>
+      </Alert>
+      </>
+    )}
 
 
                   {selectedNode.type === "webhook" && (
@@ -2836,6 +2851,89 @@ useEffect(() => {
     </div>
   );
 })()}
+                  {selectedNode.type === "mcp_connector" && (
+                      <>
+                        <div>
+                          <Label htmlFor="mcp_server_url">URL Сервера MCP</Label>
+                          <Input
+                          id="mcp_server_url"
+                          placeholder="http://localhost:8001"
+                          value={selectedNode.data.config.mcp_server_url || ""}
+                          onChange={(e) => updateNodeConfig("mcp_server_url", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Адрес запущенного MCP-совместимого сервера.
+                        </p>
+                      </div>
+                  
+                      <div>
+                        <Label htmlFor="mcp_function_name">Имя Функции</Label>
+                        <Input
+                          id="mcp_function_name"
+                          placeholder="extract_text"
+                          value={selectedNode.data.config.mcp_function_name || ""}
+                          onChange={(e) => updateNodeConfig("mcp_function_name", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Имя функции, которую нужно вызвать на MCP-сервере.
+                        </p>
+                      </div>
+                  
+                      <div>
+                        <Label htmlFor="mcp_parameters">Параметры (JSON)</Label>
+                        <Textarea
+                          id="mcp_parameters"
+                          placeholder='{ "url": "{{ StartNode.some_url }}" }'
+                          value={selectedNode.data.config.mcp_parameters || "{}"}
+                          onChange={(e) => updateNodeConfig("mcp_parameters", e.target.value)}
+                          rows={5}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          JSON-объект с параметрами. Поддерживает шаблоны `{{...}}`.
+                        </p>
+                      </div>
+                    </>
+                  )}
+ 
+                  {selectedNode.type === "filesystem" && (
+                    <>
+                      <div>
+                        <Label htmlFor="fs_operation">Операция</Label>
+                        <Select
+                          value={selectedNode.data.config.fs_operation || "update_workflows"}
+                          onValueChange={(value) => updateNodeConfig("fs_operation", value)}
+                        >
+                          <SelectTrigger id="fs_operation">
+                            <SelectValue placeholder="Выберите операцию" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="update_workflows">Обновить/добавить воркфлоу</SelectItem>
+                            {/* Можно будет добавить другие операции в будущем */}
+                            {/* <SelectItem value="read">Прочитать файл</SelectItem> */}
+                            {/* <SelectItem value="write">Записать в файл</SelectItem> */}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Действие, которое выполнит нода.
+                        </p>
+                      </div>
+                  
+                      <div>
+                        <Label htmlFor="fs_file_path">Путь к файлу</Label>
+                        <Input
+                          id="fs_file_path"
+                          placeholder="saved_workflows.json"
+                          value={selectedNode.data.config.fs_file_path || "saved_workflows.json"}
+                          onChange={(e) => updateNodeConfig("fs_file_path", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Целевой файл для операции. Для `update_workflows` входные данные от предыдущей ноды будут добавлены
+      в этот JSON-файл.
+                        </p>
+                      </div>
+                    </>
+                  )}
+
 
                   {/********************************************/}
                   {/*      КОНЕЦ БЛОКА ДЛЯ НОДЫ "ДИСПЕТЧЕР"      */}

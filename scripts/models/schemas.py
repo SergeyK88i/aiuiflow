@@ -38,6 +38,14 @@ class NodeConfig(BaseModel):
     enable_planning: Optional[bool] = False
     available_workflows: Optional[Dict[str, Any]] = {}
     session_storage: Optional[str] = "memory"
+    # --- НОВЫЕ ПОЛЯ ДЛЯ MCP Connector ---
+    mcp_server_url: Optional[str] = None
+    mcp_function_name: Optional[str] = None
+    mcp_parameters: Optional[str] = '{}' # Будем хранить как JSON-строку
+    # --- НОВЫЕ ПОЛЯ ДЛЯ File System ---
+    fs_operation: Optional[str] = 'update_workflows' # например, 'update_workflows', 'read'
+    fs_file_path: Optional[str] = 'saved_workflows.json'
+    fs_content: Optional[str] = '' # Для простой записи, поддерживает шаблоны
 
 class Node(BaseModel):
     id: str

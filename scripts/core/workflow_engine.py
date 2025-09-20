@@ -16,6 +16,8 @@ from scripts.core.node_executors.timer import execute_timer
 from scripts.core.node_executors.webhook_trigger import execute_webhook_trigger
 from scripts.core.node_executors.email import execute_email
 from scripts.core.node_executors.database import execute_database
+from scripts.core.node_executors.mcp_connector import execute_mcp_connector # <--- ДОБАВИТЬ ЭТОТ ИМПОРТ
+from scripts.core.node_executors.filesystem import execute_filesystem # <--- ДОБАВИТЬ ЭТОТ ИМПОРТ
 
 logger = logging.getLogger(__name__)
 
@@ -174,5 +176,7 @@ def get_executor(node_type: str):
         'webhook_trigger': execute_webhook_trigger,
         'email': execute_email,
         'database': execute_database,
+        'mcp_connector': execute_mcp_connector, # <--- ДОБАВИТЬ ЭТУ СТРОКУ
+        'filesystem': execute_filesystem, # <--- ДОБАВИТЬ ЭТУ СТРОКУ
     }
     return executor_map.get(node_type)
