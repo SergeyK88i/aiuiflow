@@ -661,106 +661,6 @@
         "updated_at": "2025-08-26T13:35:44.767875",
         "status": "draft"
     },
-    "full_test": {
-        "name": "full_test",
-        "nodes": [
-            {
-                "id": "node-1751391253489",
-                "type": "gigachat",
-                "position": {
-                    "x": 151.0,
-                    "y": 140.0
-                },
-                "data": {
-                    "label": "GigaChat AI",
-                    "config": {
-                        "role": "assistant",
-                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
-                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
-                        "userMessage": "твоя задача выбрать ОДИН  все get запросы из предложенного массив и в ответе вернуть вот  json, кроме json больше нечего не пиши\n[\n  {\n    \"endpoint\": \"/users/1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/posts\",\n    \"method\": \"POST\",\n    \"body\": {\n      \"title\": \"Test\",\n      \"body\": \"Hello\",\n      \"userId\": 1\n    }\n  },\n  {\n    \"endpoint\": \"/comments?postId=1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/todos/5\",\n    \"method\": \"PATCH\",\n    \"body\": {\n      \"completed\": true\n    }\n  },\n  {\n    \"endpoint\": \"/albums\",\n    \"method\": \"GET\"\n  }\n]\n",
-                        "clearHistory": false
-                    }
-                }
-            },
-            {
-                "id": "node-1751391354756",
-                "type": "request_iterator",
-                "position": {
-                    "x": 489.0,
-                    "y": 234.0
-                },
-                "data": {
-                    "label": "Request Iterator",
-                    "config": {
-                        "baseUrl": "https://jsonplaceholder.typicode.com",
-                        "executionMode": "sequential",
-                        "commonHeaders": "{}",
-                        "jsonInput": "{{node-1751391253489.text}}"
-                    }
-                }
-            },
-            {
-                "id": "node-1751391980796",
-                "type": "webhook",
-                "position": {
-                    "x": 505.0,
-                    "y": 36.0
-                },
-                "data": {
-                    "label": "Send Webhook",
-                    "config": {
-                        "url": "https://jsonplaceholder.typicode.com/{{ node-1751391253489.json.endpoint }}",
-                        "method": "GET",
-                        "headers": "Content-Type: application/json"
-                    }
-                }
-            },
-            {
-                "id": "node-1751402260573",
-                "type": "join",
-                "position": {
-                    "x": 780.0,
-                    "y": 548.0
-                },
-                "data": {
-                    "label": "Join/Merge",
-                    "config": {
-                        "waitForAll": true,
-                        "mergeStrategy": "merge_json",
-                        "separator": "\n\n---\n\n"
-                    }
-                }
-            }
-        ],
-        "connections": [
-            {
-                "id": "node-1751391253489-node-1751391980796-1751392053718",
-                "source": "node-1751391253489",
-                "target": "node-1751391980796",
-                "data": {}
-            },
-            {
-                "id": "node-1751391253489-node-1751391354756-1751392118633",
-                "source": "node-1751391253489",
-                "target": "node-1751391354756",
-                "data": {}
-            },
-            {
-                "id": "node-1751391980796-node-1751402260573-1751402264034",
-                "source": "node-1751391980796",
-                "target": "node-1751402260573",
-                "data": {}
-            },
-            {
-                "id": "node-1751391354756-node-1751402260573-1751402266251",
-                "source": "node-1751391354756",
-                "target": "node-1751402260573",
-                "data": {}
-            }
-        ],
-        "created_at": "2025-07-01T20:34:28.349334",
-        "updated_at": "2025-08-31T23:40:50.812494"
-    },
     "full_test_": {
         "name": "full_test (копия)",
         "nodes": [
@@ -1445,6 +1345,159 @@
         ],
         "created_at": "2025-08-27T18:09:03.692608",
         "updated_at": "2025-08-31T18:15:20.881854",
+        "status": "draft"
+    },
+    "mcp": {
+        "name": "mcp",
+        "nodes": [
+            {
+                "id": "node-1758484547610",
+                "type": "mcp_connector",
+                "position": {
+                    "x": 300.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "Создать отчет",
+                    "config": {
+                        "mcp_server_url": "http://localhost:8001",
+                        "session_id": "user123",
+                        "json_rpc_method": "tools/call",
+                        "json_rpc_params": "{\n\"name\": \"create_report\",\n\"arguments\": {\n\"title\": \"Мой первый отчет\",\"text\": \"Это текст моего первого отчета.\"\n}\n}"
+                    }
+                }
+            },
+            {
+                "id": "node-1758488988066",
+                "type": "mcp_connector",
+                "position": {
+                    "x": 588.0,
+                    "y": 152.0
+                },
+                "data": {
+                    "label": "Получить сводку",
+                    "config": {
+                        "mcp_server_url": "http://localhost:8001",
+                        "session_id": "user123",
+                        "json_rpc_method": "tools/call",
+                        "json_rpc_params": "{\n\"name\": \"get_report_summary\",\n\"arguments\": {}\n}"
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "node-1758484547610-node-1758488988066-1758488991435",
+                "source": "node-1758484547610",
+                "target": "node-1758488988066",
+                "data": {}
+            }
+        ],
+        "created_at": "2025-09-21T00:12:32.203981",
+        "updated_at": "2025-09-22T20:44:45.950710",
+        "status": "draft"
+    },
+    "test_telegram_mcp": {
+        "name": "test_telegram_mcp",
+        "nodes": [
+            {
+                "id": "node-1758565050391",
+                "type": "mcp_connector",
+                "position": {
+                    "x": 471.0,
+                    "y": 99.0
+                },
+                "data": {
+                    "label": "Telegram",
+                    "config": {
+                        "mcp_server_url": "http://localhost:8001",
+                        "session_id": "",
+                        "json_rpc_method": "tools/call",
+                        "json_rpc_params": "{\n\"name\": \"send_message\",\n\"arguments\": {\n\"chat_id\": 12345678,\n\"text\": \"Привет из нашего нового MCP-сервера!\"\n}"
+                    }
+                }
+            },
+            {
+                "id": "node-1758565556781",
+                "type": "webhook_trigger",
+                "position": {
+                    "x": 204.0,
+                    "y": 190.0
+                },
+                "data": {
+                    "label": "Webhook Trigger",
+                    "config": {
+                        "url": "https://api.example.com/webhook",
+                        "method": "POST",
+                        "headers": "Content-Type: application/json",
+                        "webhookId": "6341d166-703a-4d7d-8c5e-05136e5c6556",
+                        "webhookUrl": "http://localhost:8000/api/v1/webhooks/6341d166-703a-4d7d-8c5e-05136e5c6556"
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "node-1758565556781-node-1758565050391-1758565576191",
+                "source": "node-1758565556781",
+                "target": "node-1758565050391",
+                "data": {}
+            }
+        ],
+        "created_at": "2025-09-22T21:26:49.314799",
+        "updated_at": "2025-09-22T21:38:15.411220",
+        "status": "published"
+    },
+    "__workflowwww": {
+        "name": "Мой новый workflowwww",
+        "nodes": [
+            {
+                "id": "node-1758568175774",
+                "type": "gigachat",
+                "position": {
+                    "x": 132.0,
+                    "y": 110.0
+                },
+                "data": {
+                    "label": "Chat",
+                    "config": {
+                        "role": "assistant",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
+                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
+                        "userMessage": "Привет! Расскажи что-нибудь интересное о программировании.",
+                        "clearHistory": false
+                    }
+                }
+            },
+            {
+                "id": "node-1758568250419",
+                "type": "gigachat",
+                "position": {
+                    "x": 537.0,
+                    "y": 171.0
+                },
+                "data": {
+                    "label": "GigaChat AI",
+                    "config": {
+                        "role": "assistant",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
+                        "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
+                        "userMessage": "Расскажи о чем говорится в {{Chat.text}}",
+                        "clearHistory": false
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "node-1758568175774-node-1758568250419-1758568258935",
+                "source": "node-1758568175774",
+                "target": "node-1758568250419",
+                "data": {}
+            }
+        ],
+        "created_at": "2025-09-22T22:10:07.510401",
+        "updated_at": "2025-09-22T22:11:53.257303",
         "status": "draft"
     }
 }

@@ -42,7 +42,7 @@ async def execute_node(
 
         # Pass dependencies to executors that need them
         if node.type == 'gigachat':
-            result = await executor(node, {}, input_data or {}, gigachat_api)
+            result = await executor(node, {}, input_data or {}, gigachat_api, {})
         elif node.type == 'dispatcher':
             result = await executor(node, {}, input_data or {}, gigachat_api, dispatcher_sessions)
         else:

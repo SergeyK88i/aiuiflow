@@ -1021,7 +1021,7 @@ useEffect(() => {
       gigachat: {
         role: "assistant", // Добавляем роль по умолчанию
         authToken:
-          "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjNmN2FjY2VjLWUxZmEtNDEwMS05MmEyLTg1NGUwMTdlYTc0Mg==",
+          "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
         systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
         userMessage: "Привет! Расскажи что-нибудь интересное о программировании.",
         clearHistory: false,
@@ -1071,6 +1071,18 @@ useEffect(() => {
         useAI: false,
         dispatcherAuthToken: '',
         routes: {}
+      },
+      mcp_connector: {
+        mcp_server_url: "http://localhost:8001",
+        session_id: "{{input.user_id}}",
+        json_rpc_method: "tools/list",
+        json_rpc_params: "{}"
+      },
+      mcp_connector: {
+        mcp_server_url: "http://localhost:8001",
+        session_id: "{{input.user_id}}", // Пример использования шаблона
+        json_rpc_method: "tools/list",
+        json_rpc_params: "{}"
       },
       loop: {
         inputArrayPath: "items",           // стандартный путь к массиву
@@ -2851,44 +2863,54 @@ useEffect(() => {
   );
 })()}
                   {selectedNode.type === "mcp_connector" && (
-                      <>
-                        <div>
-                          <Label htmlFor="mcp_server_url">URL Сервера MCP</Label>
-                          <Input
+                    <>
+                      <div>
+                        <Label htmlFor="mcp_server_url">URL Сервера MCP (JSON-RPC)</Label>
+                        <Input
                           id="mcp_server_url"
                           placeholder="http://localhost:8001"
                           value={selectedNode.data.config.mcp_server_url || ""}
                           onChange={(e) => updateNodeConfig("mcp_server_url", e.target.value)}
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          Адрес запущенного MCP-совместимого сервера.
+                          Адрес сервера, принимающего JSON-RPC 2.0 запросы.
                         </p>
                       </div>
-                  
                       <div>
-                        <Label htmlFor="mcp_function_name">Имя Функции</Label>
+                        <Label htmlFor="session_id">ID Сессии</Label>
                         <Input
-                          id="mcp_function_name"
-                          placeholder="extract_text"
-                          value={selectedNode.data.config.mcp_function_name || ""}
-                          onChange={(e) => updateNodeConfig("mcp_function_name", e.target.value)}
+                          id="session_id"
+                          placeholder="{{input.user_id}}"
+                          value={selectedNode.data.config.session_id || ""}
+                          onChange={(e) => updateNodeConfig("session_id", e.target.value)}
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          Имя функции, которую нужно вызвать на MCP-сервере.
+                          Уникальный ID для сессии (можно использовать шаблон).
                         </p>
                       </div>
-                  
                       <div>
-                        <Label htmlFor="mcp_parameters">Параметры (JSON)</Label>
+                        <Label htmlFor="json_rpc_method">Метод (JSON-RPC)</Label>
+                        <Input
+                          id="json_rpc_method"
+                          placeholder="tools/list или tools/call"
+                          value={selectedNode.data.config.json_rpc_method || ""}
+                          onChange={(e) => updateNodeConfig("json_rpc_method", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Имя вызываемого JSON-RPC метода.
+                        </p>
+                      </div>
+                      <div>
+                        <Label htmlFor="json_rpc_params">Параметры (JSON)</Label>
                         <Textarea
-                          id="mcp_parameters"
-                          placeholder='{ "url": "{{ StartNode.some_url }}" }'
-                          value={selectedNode.data.config.mcp_parameters || "{}"}
-                          onChange={(e) => updateNodeConfig("mcp_parameters", e.target.value)}
+                          id="json_rpc_params"
+                          placeholder={'{ "name": "echo", "arguments": { "data": {{input.text}} } }'}
+                          value={selectedNode.data.config.json_rpc_params || "{}"}
+                          onChange={(e) => updateNodeConfig("json_rpc_params", e.target.value)}
                           rows={5}
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          {'JSON-объект с параметрами. Поддерживает шаблоны `{{...}}`.'}
+                          JSON-объект с параметрами для метода. Поддерживает шаблоны.
                         </p>
                       </div>
                     </>
