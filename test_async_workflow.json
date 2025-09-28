@@ -1,0 +1,38 @@
+{
+  "name": "Test Async Workflow",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "webhook_trigger",
+      "position": { "x": 100, "y": 100 },
+      "data": {
+        "label": "Concurrent Test Trigger",
+        "config": {
+          "webhookId": "async-test-123"
+        }
+      }
+    },
+    {
+      "id": "gigachat",
+      "type": "gigachat",
+      "position": { "x": 350, "y": 100 },
+      "data": {
+        "label": "GigaChat Async Test",
+        "config": {
+          "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
+          "systemMessage": "Ты ассистент, который очень кратко отвечает на вопрос.",
+          "userMessage": "Расскажи мне минутный факт о космосе. Мой номер запроса: {{input.output.body.req_id}}"
+        }
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "c1",
+      "source": "start",
+      "target": "gigachat",
+      "data": {}
+    }
+  ],
+  "status": "published"
+}

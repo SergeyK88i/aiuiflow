@@ -49,7 +49,7 @@ async def _send_telegram_message(chat_id: int, text: str) -> dict:
     url = f"{TELEGRAM_API_URL}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as response:
+        async with session.post(url, json=payload, ssl=False) as response:
             if response.ok:
                 logger.info(f"✅ Сообщение в чат {chat_id} успешно отправлено.")
                 return await response.json()

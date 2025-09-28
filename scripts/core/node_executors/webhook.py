@@ -1,6 +1,7 @@
 import logging
 import json
 import aiohttp
+import ast
 from datetime import datetime
 from typing import Dict, Any
 
@@ -37,11 +38,21 @@ async def execute_webhook(node: Node, label_to_id_map: Dict[str, str], input_dat
         
         payload = None
         if method in ['POST', 'PUT', 'PATCH']:
-            resolved_body_str = replace_templates(body_template, input_data, label_to_id_map, all_results)
-            try:
-                payload = json.loads(resolved_body_str)
-            except json.JSONDecodeError:
-                raise Exception(f"Invalid JSON in Request Body after template replacement. Result: {resolved_body_str}")
+            resolved_body_obj = replace_templates(body_template, input_data, label_to_id_map, all_results)
+            
+            if isinstance(resolved_body_obj, dict):
+                payload = resolved_body_obj
+            elif isinstance(resolved_body_obj, str) and resolved_body_obj.strip():
+                try:
+                    payload = json.loads(resolved_body_obj)
+                except json.JSONDecodeError:
+                    logger.warning(f"Webhook node {node.id}: json.loads() failed for body. Falling back to ast.literal_eval().")
+                    try:
+                        payload = ast.literal_eval(resolved_body_obj)
+                        if not isinstance(payload, dict):
+                            raise TypeError("ast.literal_eval() did not produce a dictionary.")
+                    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError) as e:
+                        raise Exception(f"Webhook node {node.id}: Failed to parse bodyTemplate with both json and ast. Result: '{resolved_body_obj}'. Error: {e}")
 
         logger.info(f"🌐 Sending {method} to {url}")
         if payload:

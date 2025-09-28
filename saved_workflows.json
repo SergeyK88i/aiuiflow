@@ -108,7 +108,8 @@
                     "label": "Отправить на httpbin",
                     "config": {
                         "url": "https://httpbin.org/post",
-                        "method": "POST"
+                        "method": "POST",
+                        "bodyTemplate": "{\n  \"source\": \"Gemini-Template-Test\",\n  \"trigger_time\": \"{{ timer_node_1.output.timestamp }}\",\n  \"trigger_message\": \"{{ timer_node_1.output.text }}\"\n}"
                     }
                 }
             }
@@ -476,7 +477,7 @@
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "придумай тему разговора",
                         "clearHistory": false
@@ -494,7 +495,7 @@
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "Проанализируй ендпоинты и выбери только там где тип get, ответ должен выглядеть ввиде массив объекто и никаких дополнительных фразу, только массив оьъектов\n[\n  {\n    \"endpoint\": \"/users/1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/posts\",\n    \"method\": \"POST\",\n    \"body\": {\n      \"title\": \"Test\",\n      \"body\": \"Hello\",\n      \"userId\": 1\n    }\n  },\n  {\n    \"endpoint\": \"/comments?postId=1\",\n    \"method\": \"GET\"\n  },\n  {\n    \"endpoint\": \"/todos/5\",\n    \"method\": \"PATCH\",\n    \"body\": {\n      \"completed\": true\n    }\n  },\n  {\n    \"endpoint\": \"/albums\",\n    \"method\": \"GET\"\n  }\n]\n",
                         "clearHistory": false
@@ -512,7 +513,7 @@
                     "label": "GigaChat AI",
                     "config": {
                         "role": "assistant",
-                        "authToken": "MTZhNzNmMTktNjg3YS00NGRiLWE3NjItYjU3NjgzY2I0ZDlhOjBiMDg5OGU4LWFlNGItNGZhYS1iMDg1LTY3NDU4NWQ3NmI4Mg==",
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
                         "systemMessage": "Ты полезный ассистент, который отвечает кратко и по делу.",
                         "userMessage": "Проанализируй историю диалога и ответь на вопрос: Какой был самый первый вопрос в этом диалоге? Вот данные для анализа:\n\nВопрос из первой ноды: {{ node-1751277371935.inputs.final_user_message }}\nОтвет из первой ноды: {{ node-1751277371935.text }}",
                         "clearHistory": false
@@ -535,7 +536,7 @@
             }
         ],
         "created_at": "2025-06-27T00:15:29.095815",
-        "updated_at": "2025-06-30T13:14:45.550570"
+        "updated_at": "2025-09-27T14:37:32.040019"
     },
     "__workflow": {
         "name": "Мой новый workflow",
@@ -1404,8 +1405,8 @@
                 "id": "node-1758565050391",
                 "type": "mcp_connector",
                 "position": {
-                    "x": 471.0,
-                    "y": 99.0
+                    "x": 465.0,
+                    "y": 378.0
                 },
                 "data": {
                     "label": "Telegram",
@@ -1413,7 +1414,7 @@
                         "mcp_server_url": "http://localhost:8001",
                         "session_id": "",
                         "json_rpc_method": "tools/call",
-                        "json_rpc_params": "{\n\"name\": \"send_message\",\n\"arguments\": {\n\"chat_id\": 12345678,\n\"text\": \"Привет из нашего нового MCP-сервера!\"\n}"
+                        "json_rpc_params": "{\"name\": \"send_message\",\"arguments\": {\"chat_id\": 1480403192,\"text\": \"Привет из нашего нового MCP-сервера!\"}}"
                     }
                 }
             },
@@ -1421,8 +1422,8 @@
                 "id": "node-1758565556781",
                 "type": "webhook_trigger",
                 "position": {
-                    "x": 204.0,
-                    "y": 190.0
+                    "x": 161.0,
+                    "y": 255.0
                 },
                 "data": {
                     "label": "Webhook Trigger",
@@ -1445,7 +1446,7 @@
             }
         ],
         "created_at": "2025-09-22T21:26:49.314799",
-        "updated_at": "2025-09-22T21:38:15.411220",
+        "updated_at": "2025-09-22T22:28:44.068119",
         "status": "published"
     },
     "__workflowwww": {
@@ -1499,5 +1500,96 @@
         "created_at": "2025-09-22T22:10:07.510401",
         "updated_at": "2025-09-22T22:11:53.257303",
         "status": "draft"
+    },
+    "test_async_workflow": {
+        "name": "Test Async Workflow",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "webhook_trigger",
+                "position": {
+                    "x": 100.0,
+                    "y": 100.0
+                },
+                "data": {
+                    "label": "Concurrent Test Trigger",
+                    "config": {
+                        "webhookId": "async-test-123"
+                    }
+                }
+            },
+            {
+                "id": "gigachat",
+                "type": "gigachat",
+                "position": {
+                    "x": 350.0,
+                    "y": 100.0
+                },
+                "data": {
+                    "label": "GigaChat Async Test",
+                    "config": {
+                        "authToken": "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
+                        "systemMessage": "Ты ассистент, который очень кратко отвечает на вопрос.",
+                        "userMessage": "Расскажи мне минутный факт о космосе. Мой номер запроса: {{input.output.body.req_id}}"
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "c1",
+                "source": "start",
+                "target": "gigachat",
+                "data": {}
+            }
+        ],
+        "created_at": "2025-09-27T14:48:17.801719",
+        "updated_at": "2025-09-27T15:11:11.965665",
+        "status": "draft"
+    },
+    "webhook_robustness_test": {
+        "name": "Webhook Robustness Test",
+        "nodes": [
+            {
+                "id": "timer_node_test",
+                "type": "timer",
+                "position": {
+                    "x": 100.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "Test Timer",
+                    "config": {
+                        "interval": 5
+                    }
+                }
+            },
+            {
+                "id": "webhook_under_test",
+                "type": "webhook",
+                "position": {
+                    "x": 400.0,
+                    "y": 200.0
+                },
+                "data": {
+                    "label": "Robustness Test Webhook",
+                    "config": {
+                        "url": "https://httpbin.org/post",
+                        "method": "POST",
+                        "bodyTemplate": "{\n  \"test_name\": \"Webhook Robustness Test\",\n  \"trigger_info\": {\n    \"timestamp\": \"{{ timer_node_test.output.timestamp }}\",\n    \"message\": \"This is a test with pretty-printed JSON.\"\n  }\n}"
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "c1",
+                "source": "timer_node_test",
+                "target": "webhook_under_test",
+                "data": {}
+            }
+        ],
+        "status": "published",
+        "updated_at": "2025-09-28T12:26:21.406923"
     }
 }

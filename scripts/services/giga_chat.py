@@ -1,4 +1,4 @@
-import requests
+import aiohttp
 import uuid
 import json
 import logging
@@ -30,21 +30,27 @@ class GigaChatAPI:
 
         try:
             logger.info(f"🔑 Попытка получить токен. URL: {url}")
-            response = requests.post(url, headers=headers, data=payload, verify=False)
-            if response.status_code == 200:
-                self.access_token = response.json()['access_token']
-                logger.info("✅ GigaChat токен получен успешно")
-                return True
-            else:
-                logger.error(f"❌ Ошибка получения токена: {response.status_code}")
-                try:
-                    error_details = response.json()
-                    logger.error(f"🔍 Детали ошибки от GigaChat: {error_details}")
-                except json.JSONDecodeError:
-                    logger.error(f"🔍 Ответ от GigaChat (не JSON): {response.text}")
-                return False
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, data=payload, ssl=False) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        self.access_token = data['access_token']
+                        logger.info("✅ GigaChat токен получен успешно")
+                        return True
+                    else:
+                        logger.error(f"❌ Ошибка получения токена: {response.status}")
+                        try:
+                            error_details = await response.json()
+                            logger.error(f"🔍 Детали ошибки от GigaChat: {error_details}")
+                        except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                            error_text = await response.text()
+                            logger.error(f"🔍 Ответ от GigaChat (не JSON): {error_text}")
+                        return False
+        except aiohttp.ClientError as e:
+            logger.error(f"❌ Ошибка сети при получении токена: {str(e)}")
+            return False
         except Exception as e:
-            logger.error(f"❌ Ошибка при получении токена: {str(e)}")
+            logger.error(f"❌ Непредвиденная ошибка при получении токена: {str(e)}")
             return False
 
     async def get_chat_completion(self, system_message: str, user_message: str) -> Dict[str, Any]:
@@ -75,34 +81,36 @@ class GigaChatAPI:
         }
 
         try:
-            response = requests.post(url, headers=headers, data=json.dumps(payload), verify=False)
-            if response.status_code == 200:
-                self.conversation_history.append({"role": "user", "content": user_message})
-                assistant_response = response.json()['choices'][0]['message']['content']
-                self.conversation_history.append({"role": "assistant", "content": assistant_response})
-                
-                logger.info(f"✅ Получен ответ от GigaChat")
-                return {
-                    "success": True,
-                    "response": assistant_response,
-                    "user_message": user_message,
-                    "system_message": system_message,
-                    "conversation_length": len(self.conversation_history)
-                }
-            else:
-                logger.error(f"❌ Ошибка API GigaChat: {response.status_code}")
-                return {
-                    "success": False,
-                    "error": f"API Error: {response.status_code}",
-                    "response": None
-                }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, ssl=False) as response:
+                    if response.status == 200:
+                        self.conversation_history.append({"role": "user", "content": user_message})
+                        data = await response.json()
+                        assistant_response = data['choices'][0]['message']['content']
+                        self.conversation_history.append({"role": "assistant", "content": assistant_response})
+                        
+                        logger.info(f"✅ Получен ответ от GigaChat")
+                        return {
+                            "success": True,
+                            "response": assistant_response,
+                            "user_message": user_message,
+                            "system_message": system_message,
+                            "conversation_length": len(self.conversation_history)
+                        }
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ Ошибка API GigaChat: {response.status} - {error_text}")
+                        return {
+                            "success": False,
+                            "error": f"API Error: {response.status} - {error_text}",
+                            "response": None
+                        }
+        except aiohttp.ClientError as e:
+            logger.error(f"❌ Ошибка сети при запросе к GigaChat: {str(e)}")
+            return { "success": False, "error": str(e), "response": None }
         except Exception as e:
-            logger.error(f"❌ Ошибка при запросе к GigaChat: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "response": None
-            }
+            logger.error(f"❌ Непредвиденная ошибка при запросе к GigaChat: {str(e)}")
+            return { "success": False, "error": str(e), "response": None }
 
     def clear_history(self):
         """Очистка истории диалога"""
