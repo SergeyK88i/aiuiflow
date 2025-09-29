@@ -1,0 +1,48 @@
+{
+    "name": "Doc Consultant Workflow",
+    "nodes": [
+        {
+            "id": "trigger",
+            "type": "webhook_trigger",
+            "position": { "x": 100, "y": 200 },
+            "data": {
+                "label": "Получить вопрос от пользователя",
+                "config": {
+                    "webhookId": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+                    "webhookUrl": "http://localhost:8000/api/v1/webhooks/a1b2c3d4-e5f6-7890-1234-567890abcdef"
+                }
+            }
+        },
+        {
+            "id": "rag_server_call",
+            "type": "mcp_connector",
+            "position": { "x": 400, "y": 200 },
+            "data": {
+                "label": "Найти ответ в документации",
+                "config": {
+                    "mcp_server_url": "http://localhost:8002",
+                    "json_rpc_method": "tools/call",
+                    "json_rpc_params": "{\"name\": \"answer_question\", \"arguments\": {\"query\": \"{{ trigger.output.body.message }}\"}}"
+                }
+            }
+        },
+        {
+            "id": "telegram_response",
+            "type": "mcp_connector",
+            "position": { "x": 700, "y": 200 },
+            "data": {
+                "label": "Отправить ответ в Telegram",
+                "config": {
+                    "mcp_server_url": "http://localhost:8001",
+                    "json_rpc_method": "tools/call",
+                    "json_rpc_params": "{\"name\": \"send_message\", \"arguments\": {\"chat_id\": {{ trigger.output.body.chat_id }}, \"text\": \"{{ rag_server_call.content[0].text }}\"}}"
+                }
+            }
+        }
+    ],
+    "connections": [
+        { "id": "c1", "source": "trigger", "target": "rag_server_call", "data": {} },
+        { "id": "c2", "source": "rag_server_call", "target": "telegram_response", "data": {} }
+    ],
+    "status": "published"
+}

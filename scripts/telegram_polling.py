@@ -28,73 +28,32 @@ async def send_message(chat_id, text):
         })
 
 async def process_message(message):
-    """Обрабатывает сообщение через ваш workflow"""
+    """Обрабатывает сообщение, просто запуская workflow."""
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
     user_name = message["from"].get("first_name", "User")
-    print(f"📨 Получено сообщение: '{text}' от {user_name}")
-
-    # --- НОВАЯ ЛОГИКА ---
-    # Список ID нод, которые генерируют финальный ответ для пользователя.
-    # Возьмите эти ID из вашего UI-редактора.
-    HANDLER_NODE_IDS = [
-        "node-1750962774246",
-    ]
-    # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+    print(f"📨 Получено сообщение: '{text}' от {user_name}. Запускаю воркфлоу...")
 
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         try:
+            # Просто запускаем воркфлоу и не ждем ответа для обработки.
+            # Устанавливаем короткий таймаут, чтобы не блокировать поллер надолго.
+            timeout = aiohttp.ClientTimeout(total=5)
             async with session.post(LOCAL_WORKFLOW_URL, json={
                 "user_id": f"tg_{message['from']['id']}",
                 "message": text,
                 "chat_id": chat_id,
                 "user_name": user_name
-            }) as response:
-                print(f"📡 Статус ответа от сервера: {response.status}")
-                if response.status == 200:
-                    result = await response.json()
-                    print(f"📦 Получен результат: {json.dumps(result, ensure_ascii=False, indent=2)[:500]}")
-
-                    if result:
-                        all_node_results = None
-                        # Проверяем, есть ли вложенный ключ 'result' (для совместимости)
-                        if "result" in result and result["result"]:
-                            all_node_results = result["result"]
-                        else:
-                            # Если нет, значит результат и есть словарь с нодами
-                            all_node_results = result
-
-                        final_answer = None
-
-                        # 1. Сначала ищем ответ в приоритетных нодах-обработчиках
-                        for node_id in HANDLER_NODE_IDS:
-                            if node_id in all_node_results:
-                                node_result = all_node_results[node_id]
-                                # Ищем текст ответа в output.text или в response
-                                # answer_text = node_result.get("output", {}).get("text") or node_result.get("response")
-                                answer_text = node_result.get("text")
-                                if answer_text and isinstance(answer_text, str):
-                                    # Проверяем, что это не JSON
-                                    if not answer_text.strip().startswith('{'):
-                                        final_answer = answer_text
-                                        print(f"✅ Найден финальный ответ в ноде '{node_id}': {final_answer[:100]}")
-                                        break # Нашли ответ, выходим из цикла
-
-                        if final_answer:
-                            await send_message(chat_id, final_answer)
-                        else:
-                            print("⚠️ Не найден подходящий текстовый ответ в нодах-обработчиках.")
-                            await send_message(chat_id, "Извините, не могу обработать ваш запрос.")
-                    else:
-                        print("❌ Результат пустой или неверной структуры")
-                        await send_message(chat_id, "Произошла ошибка при обработке запроса")
+            }, timeout=timeout) as response:
+                # Просто логируем статус, но ничего не отправляем в ответ.
+                if response.status >= 200 and response.status < 300:
+                    print(f"✅ Воркфлоу успешно запущен (статус {response.status}).")
                 else:
                     error_text = await response.text()
-                    print(f"❌ Ошибка от сервера: {error_text}")
-                    await send_message(chat_id, "Сервис временно недоступен")
+                    print(f"⚠️ Воркфлоу вернул неожиданный статус {response.status}: {error_text}")
         except Exception as e:
-            print(f"💥 Ошибка при обращении к workflow: {str(e)}")
-            await send_message(chat_id, "Произошла техническая ошибка")
+            # Логируем ошибку, но не отправляем сообщение пользователю.
+            print(f"💥 Ошибка при запуске воркфлоу: {str(e)}")
 
 
 async def main():

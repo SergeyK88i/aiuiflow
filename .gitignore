@@ -10,6 +10,7 @@
 !.yarn/releases
 !.yarn/versions
 venv
+rag_env/
 # testing
 /coverage
 *.pyc
