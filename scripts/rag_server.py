@@ -160,6 +160,7 @@ async def navigate_and_answer(question: str) -> str:
 
         if not selected_chunks:
             logger.warning("Навигация завершена: на одном из уровней не было выбрано ни одного чанка.")
+            current_chunks = []
             break
 
         if depth == MAX_DEPTH:
@@ -174,7 +175,7 @@ async def navigate_and_answer(question: str) -> str:
         current_chunks = next_level_chunks
 
     if not current_chunks:
-        return "К сожалению, я не смог найти релевантную информацию в документации по вашему вопросу."
+        return json.dumps("К сожалению, я не смог найти релевантную информацию в документации по вашему вопросу.")
 
     logger.info(f"Синтез ответа на основе {len(current_chunks)} финальных чанков.")
     context = "\n\n---\n\n".join([c['text'] for c in current_chunks])
