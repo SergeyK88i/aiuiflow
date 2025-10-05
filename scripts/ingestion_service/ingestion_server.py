@@ -156,4 +156,4 @@ async def handle_tools_call(params: dict) -> dict:
 # --- Запуск сервера ---
 if __name__ == "__main__":
     print("🚀 Запуск Ingestion MCP Server на http://localhost:8001")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8005)

@@ -1,14 +1,15 @@
 # Этот файл будет содержать логику для нарезки текста и получения эмбеддингов
 import uuid
+import os
 from typing import List, Dict, Any
 
 # Предполагаем, что эти функции и классы доступны в окружении
 # В реальном проекте их нужно импортировать из правильных модулей
-from scripts.services.giga_chat import GigaChatAPI
+from scripts.services.giga_chat_copy import GigaChatAPI
 from nltk.tokenize import sent_tokenize
 
 # --- Конфигурация (должна быть согласована с другими частями системы) ---
-CHUNK_TARGET_SIZE = 20000
+CHUNK_TARGET_SIZE = 1500
 
 # Инициализируем GigaChat API клиент один раз
 # В реальном приложении токен должен управляться централизованно
@@ -34,10 +35,11 @@ async def process_text_to_chunks(raw_text: str, doc_name: str) -> List[Dict[str,
     """Полный пайплайн обработки текста: нарезка, метаданные, эмбеддинги."""
     
     # Убедимся, что у нас есть токен для получения эмбеддингов
-    # В реальной системе токен не должен передаваться так, это для примера
     if not gigachat_client.access_token:
-        from scripts.rag_server_copy import GIGACHAT_AUTH_TOKEN # Плохая практика, но для примера
-        await gigachat_client.get_token(GIGACHAT_AUTH_TOKEN)
+        auth_token = os.getenv("GIGACHAT_AUTH_TOKEN")
+        if not auth_token:
+            raise ValueError("Переменная окружения GIGACHAT_AUTH_TOKEN не установлена!")
+        await gigachat_client.get_token(auth_token)
 
     text_chunks = split_text_into_chunks(raw_text, CHUNK_TARGET_SIZE)
     

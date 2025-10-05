@@ -5,6 +5,7 @@ import os
 import json
 import argparse # <-- Добавляем парсер аргументов
 from typing import Dict, Any
+from pgvector.asyncpg import register_vector
 
 # Эти модули мы создадим на следующих шагах
 from .loaders import load_data_from_source
@@ -74,7 +75,7 @@ async def process_job(job: Dict[str, Any], db_pool: asyncpg.Pool):
 async def main_loop(queue_name: str):
     """Бесконечный цикл воркера для поиска и обработки задач в конкретной очереди."""
     logger.info(f"🛠️ Воркер запущен. Слушаю очередь: '{queue_name}'...")
-    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    db_pool = await asyncpg.create_pool(DATABASE_URL, init=register_vector)
 
     while True:
         try:
