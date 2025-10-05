@@ -69,9 +69,17 @@ async def lifespan(app: FastAPI):
     
     # 2. Загрузка базы знаний (кэша вопросов)
     if os.path.exists(KNOWLEDGE_BASE_FILE):
-        with open(KNOWLEDGE_BASE_FILE, 'r', encoding='utf-8') as f:
-            KNOWLEDGE_BASE = json.load(f)
-        logger.info(f"✅ База знаний '{KNOWLEDGE_BASE_FILE}' успешно загружена ({len(KNOWLEDGE_BASE)} записей).")
+        try:
+            with open(KNOWLEDGE_BASE_FILE, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if content:
+                    KNOWLEDGE_BASE = json.loads(content)
+                    logger.info(f"✅ База знаний '{KNOWLEDGE_BASE_FILE}' успешно загружена ({len(KNOWLEDGE_BASE)} записей).")
+                else:
+                    logger.warning(f"⚠️ Файл базы знаний '{KNOWLEDGE_BASE_FILE}' пуст. Начинаем с чистого кэша.")
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ Ошибка декодирования JSON в '{KNOWLEDGE_BASE_FILE}'. Файл может быть поврежден. Начинаем с чистого кэша.")
+            KNOWLEDGE_BASE = []
     
     # 3. Проверка токена GigaChat
     if not await gigachat_client.get_token(GIGACHAT_AUTH_TOKEN):
