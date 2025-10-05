@@ -3,10 +3,11 @@ import asyncpg
 import logging
 import os
 import json
+import argparse # <-- Добавляем парсер аргументов
 from typing import Dict, Any
 
 # Эти модули мы создадим на следующих шагах
-from .data_loaders import load_data_from_source
+from .loaders import load_data_from_source
 from .processing import process_text_to_chunks
 
 # --- Настройка ---
@@ -45,7 +46,7 @@ async def process_job(job: Dict[str, Any], db_pool: asyncpg.Pool):
                 (c['id'], c['doc_name'], c['chunk_sequence_num'], c['header_1'], c['header_2'], c['chunk_text'], c['embedding'])
                 for c in chunks_to_insert
             ]
-            
+
             # Выполняем массовую вставку
             await connection.copy_records_to_table(
                 'chunks',
@@ -60,7 +61,7 @@ async def process_job(job: Dict[str, Any], db_pool: asyncpg.Pool):
 
     except Exception as e:
         logger.error(f"[Job {job_id}] ❌ Ошибка при выполнении задачи: {e}", exc_info=True)
-        logs.append(f"ERROR: {e}")
+        logs.append(f"ERROR: {str(e)}")
         final_status = 'failed'
     
     # Обновляем статус и лог задачи в БД
@@ -70,23 +71,24 @@ async def process_job(job: Dict[str, Any], db_pool: asyncpg.Pool):
             final_status, '\n'.join(logs), job_id
         )
 
-async def main_loop():
-    """Бесконечный цикл воркера для поиска и обработки задач."""
-    logger.info("🛠️ Воркер запущен. Ищу новые задачи...")
+async def main_loop(queue_name: str):
+    """Бесконечный цикл воркера для поиска и обработки задач в конкретной очереди."""
+    logger.info(f"🛠️ Воркер запущен. Слушаю очередь: '{queue_name}'...")
     db_pool = await asyncpg.create_pool(DATABASE_URL)
 
     while True:
         try:
             async with db_pool.acquire() as connection:
-                # Ищем и сразу блокируем одну задачу, чтобы другие воркеры ее не взяли
+                # Ищем и блокируем задачу из НАШЕЙ ОЧЕРЕДИ
                 job = await connection.fetchrow(
                     """
                     SELECT id, source_url, source_type FROM ingestion_jobs
-                    WHERE status = 'pending'
+                    WHERE status = 'pending' AND queue_name = $1
                     ORDER BY created_at
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
-                    """
+                    """,
+                    queue_name
                 )
                 if job:
                     await connection.execute("UPDATE ingestion_jobs SET status = 'processing' WHERE id = $1", job['id'])
@@ -98,11 +100,16 @@ async def main_loop():
                 await asyncio.sleep(WORKER_SLEEP_INTERVAL)
 
         except Exception as e:
-            logger.error(f"Критическая ошибка в основном цикле воркера: {e}", exc_info=True)
+            logger.error(f"Критическая ошибка в основном цикле воркера (очередь '{queue_name}'): {e}", exc_info=True)
             await asyncio.sleep(WORKER_SLEEP_INTERVAL) # Ждем перед повторной попыткой
 
 if __name__ == "__main__":
+    # --- Парсинг аргументов командной строки ---
+    parser = argparse.ArgumentParser(description="Запускает воркер для обработки задач из указанной очереди.")
+    parser.add_argument("--queue", type=str, required=True, help="Имя очереди для прослушивания (например, 'pdf' или 'website')")
+    args = parser.parse_args()
+
     try:
-        asyncio.run(main_loop())
+        asyncio.run(main_loop(args.queue))
     except KeyboardInterrupt:
-        logger.info("Воркер остановлен вручную.")
+        logger.info(f"Воркер для очереди '{args.queue}' остановлен вручную.")

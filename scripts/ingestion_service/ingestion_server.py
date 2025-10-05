@@ -118,10 +118,12 @@ async def handle_tools_call(params: dict) -> dict:
 
     if tool_name == "start_ingestion_job":
         req = JobCreateRequest(**arguments)
+        # Используем source_type как имя очереди
+        queue_name = req.source_type
         async with db_pool.acquire() as connection:
             job_id = await connection.fetchval(
-                "INSERT INTO ingestion_jobs (source_url, source_type, status) VALUES ($1, $2, 'pending') RETURNING id",
-                req.source_url, req.source_type
+                "INSERT INTO ingestion_jobs (source_url, source_type, queue_name, status) VALUES ($1, $2, $3, 'pending') RETURNING id",
+                req.source_url, req.source_type, queue_name
             )
         logger.info(f"✅ Создана новая задача на индексацию с ID: {job_id}")
         return {"content": [{"type": "json", "json": {"job_id": job_id, "status": "pending"}}], "isError": False}
