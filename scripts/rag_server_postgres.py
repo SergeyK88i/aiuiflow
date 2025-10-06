@@ -174,21 +174,42 @@ async def json_rpc_handler(request: Request):
         return JSONResponse(status_code=500, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": "Internal Error", "data": str(e)}})
 
 async def execute_db_shortcut_rag(question: str, source_chunk_ids: List[str]) -> str:
-    """Выполняет RAG, используя заранее известный набор чанков из БД."""
-    logger.info(f"SHORTCUT: Запуск RAG с использованием {len(source_chunk_ids)} кэшированных чанков из БД.")
+    """Выполняет RAG с 'расширением контекста' до полных глав."""
+    logger.info(f"SHORTCUT: Запуск RAG с расширением контекста для {len(source_chunk_ids)} исходных чанков.")
     if not db_pool:
         raise Exception("Пул соединений с базой данных не инициализирован.")
 
     async with db_pool.acquire() as connection:
-        records = await connection.fetch(
-            """SELECT chunk_text FROM chunks WHERE id = ANY($1::TEXT[])""",
+        # Шаг 1: Находим родительские главы для исходных чанков
+        chapter_records = await connection.fetch(
+            """SELECT DISTINCT header_1 FROM chunks WHERE id = ANY($1::TEXT[]) AND header_1 IS NOT NULL""",
             source_chunk_ids
         )
-    
-    context_texts = [record['chunk_text'] for record in records]
+        parent_chapters = [record['header_1'] for record in chapter_records]
+
+        context_texts = []
+        if parent_chapters:
+            logger.info(f"Найдены родительские главы: {parent_chapters}. Расширяем контекст...")
+            # Шаг 2: Загружаем ВСЕ чанки из этих глав для полного контекста
+            full_chapter_records = await connection.fetch(
+                """SELECT chunk_text FROM chunks WHERE header_1 = ANY($1::TEXT[]) ORDER BY doc_name, chunk_sequence_num""",
+                parent_chapters
+            )
+            context_texts = [record['chunk_text'] for record in full_chapter_records]
+        else:
+            # Fallback: если главы не найдены, используем старую логику (только исходные чанки)
+            logger.warning("Родительские главы для кэшированных чанков не найдены. Используем только исходные чанки.")
+            fallback_records = await connection.fetch(
+                """SELECT chunk_text FROM chunks WHERE id = ANY($1::TEXT[])""",
+                source_chunk_ids
+            )
+            context_texts = [record['chunk_text'] for record in fallback_records]
+
     if not context_texts:
         logger.error("Не удалось восстановить контекст из кэшированных ID. Запускаем полный RAG.")
-        rag_result = await execute_full_rag(question) # execute_full_rag теперь должен быть определен
+        # Для execute_full_rag нужен query_vector, получим его снова
+        query_vector = await gigachat_client.get_embedding(question)
+        rag_result = await execute_full_rag(question, query_vector)
         return rag_result['answer']
 
     context = "\n\n---\n\n".join(context_texts)
