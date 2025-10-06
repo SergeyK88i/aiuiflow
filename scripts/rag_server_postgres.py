@@ -130,7 +130,8 @@ async def rerank_chunks(question: str, chunks: List[Dict[str, Any]], limit: int 
     """Этап 2: Умная фильтрация. Использует LLM для выбора лучших чанков из кандидатов."""
     logger.info(f"🧠 Выполняю re-ranking для {len(chunks)} чанков с помощью LLM...")
     system_message = (f"Из представленных фрагментов текста выбери не более {limit} самых релевантных для ответа на вопрос. "
-                      "Верни ТОЛЬКО JSON-объект с ключом 'best_chunk_ids' и списком их ID. Пример: {\"best_chunk_ids\": [\"doc1_chunk2\", \"doc3_chunk5\"]}")
+                      "Твой ответ ДОЛЖЕН быть в формате JSON, содержащего два ключа: 'reasoning' (строка с твоими рассуждениями) и 'best_chunk_ids' (список ID). "
+                      "Пример: {\"reasoning\": \"Чанк doc1_chunk2 наиболее релевантен, так как в нем упоминается X.\", \"best_chunk_ids\": [\"doc1_chunk2\"]}")
 
     context_for_reranking = ""
     for chunk in chunks:
@@ -152,7 +153,11 @@ async def rerank_chunks(question: str, chunks: List[Dict[str, Any]], limit: int 
         json_str = match.group(0)
         logger.info(f"Extracted JSON string for re-ranking: {json_str}")
 
-        best_ids = json.loads(json_str).get('best_chunk_ids', [])
+        data = json.loads(json_str)
+        reasoning = data.get('reasoning', 'No reasoning provided.')
+        best_ids = data.get('best_chunk_ids', [])
+
+        logger.info(f"Рассуждение модели (re-ranker): {reasoning}")
         logger.info(f"✅ LLM выбрал лучшие чанки: {best_ids}")
         
         if not best_ids:
