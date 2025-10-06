@@ -173,6 +173,45 @@ async def json_rpc_handler(request: Request):
         logger.error(f"❌ Ошибка при выполнении метода '{method}': {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": "Internal Error", "data": str(e)}})
 
+async def execute_db_shortcut_rag(question: str, source_chunk_ids: List[str]) -> str:
+    """Выполняет RAG, используя заранее известный набор чанков из БД."""
+    logger.info(f"SHORTCUT: Запуск RAG с использованием {len(source_chunk_ids)} кэшированных чанков из БД.")
+    if not db_pool:
+        raise Exception("Пул соединений с базой данных не инициализирован.")
+
+    async with db_pool.acquire() as connection:
+        records = await connection.fetch(
+            """SELECT chunk_text FROM chunks WHERE id = ANY($1::TEXT[])""",
+            source_chunk_ids
+        )
+    
+    context_texts = [record['chunk_text'] for record in records]
+    if not context_texts:
+        logger.error("Не удалось восстановить контекст из кэшированных ID. Запускаем полный RAG.")
+        rag_result = await execute_full_rag(question) # execute_full_rag теперь должен быть определен
+        return rag_result['answer']
+
+    context = "\n\n---\n\n".join(context_texts)
+    return await synthesize_answer(question, context)
+
+async def execute_full_rag(question: str, query_vector: List[float]) -> Dict[str, Any]:
+    """Выполняет полный гибридный RAG-пайплайн: Поиск -> Ранжирование -> Синтез."""
+    # Шаг 1: Быстрый поиск (Retrieval)
+    candidate_chunks = await find_relevant_chunks(query_vector, limit=25)
+    if not candidate_chunks:
+        return {"answer": "К сожалению, я не смог найти релевантную информацию в базе знаний.", "source_chunk_ids": []}
+
+    # Шаг 2: Умная фильтрация (Re-ranking)
+    final_chunks = await rerank_chunks(question, candidate_chunks, limit=5)
+
+    # Шаг 3: Синтез ответа
+    context = "\n\n---\n\n".join([c['chunk_text'] for c in final_chunks])
+    final_answer = await synthesize_answer(question, context)
+    final_chunk_ids = [c['id'] for c in final_chunks]
+    
+    return {"answer": final_answer, "source_chunk_ids": final_chunk_ids}
+
+
 async def handle_tools_call(params: dict):
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
@@ -186,19 +225,39 @@ async def handle_tools_call(params: dict):
         query_vector = await gigachat_client.get_embedding(query)
         if not query_vector: raise Exception("Не удалось получить эмбеддинг для запроса.")
 
-        # Шаг 2: Быстрый поиск (Retrieval)
-        candidate_chunks = await find_relevant_chunks(query_vector, limit=25)
-        if not candidate_chunks:
-            return {"content": [{"type": "text", "text": json.dumps("К сожалению, я не смог найти релевантную информацию в базе знаний.")}], "isError": False}
+        # Шаг 2: Ищем в кэше вопросов
+        async with db_pool.acquire() as connection:
+            # Ищем самый похожий вопрос и сразу считаем схожесть
+            cached_record = await connection.fetchrow(
+                """SELECT final_answer, source_chunk_ids, (1 - (question_vector <=> $1)) AS similarity 
+                   FROM question_cache ORDER BY similarity DESC LIMIT 1""",
+                query_vector
+            )
 
-        # Шаг 3: Умная фильтрация (Re-ranking)
-        final_chunks = await rerank_chunks(query, candidate_chunks, limit=5)
+        # Шаг 3: Принимаем решение на основе кэша
+        if cached_record and cached_record['similarity'] >= CACHE_SHORTCUT_THRESHOLD:
+            if cached_record['similarity'] >= CACHE_HIT_THRESHOLD:
+                logger.info(f"CACHE HIT: Сходство ({cached_record['similarity']:.2f}) очень высокое. Отдаем готовый ответ.")
+                final_answer = cached_record['final_answer']
+            else:
+                logger.info(f"SHORTCUT: Сходство ({cached_record['similarity']:.2f}) среднее. Используем готовые чанки из БД.")
+                final_answer = await execute_db_shortcut_rag(query, cached_record['source_chunk_ids'])
+        else:
+            logger.info("CACHE MISS: Похожих вопросов в кэше не найдено, запускаем полный RAG-цикл.")
+            rag_result = await execute_full_rag(query, query_vector)
+            final_answer = rag_result['answer']
 
-        # Шаг 4: Синтез ответа
-        context = "\n\n---\n\n".join([c['chunk_text'] for c in final_chunks])
-        final_answer = await synthesize_answer(query, context)
-        
-        # На этом этапе мы не реализуем сохранение в кэш, просто возвращаем ответ
+            # Сохраняем новый результат в кэш, если он не является "отказом"
+            not_found_message = "К сожалению, я не смог найти релевантную информацию"
+            if not_found_message not in final_answer:
+                async with db_pool.acquire() as connection:
+                    await connection.execute(
+                        """INSERT INTO question_cache (question_text, question_vector, final_answer, source_chunk_ids)
+                           VALUES ($1, $2, $3, $4)""",
+                        query, query_vector, final_answer, rag_result['source_chunk_ids']
+                    )
+                logger.info("✅ Новый успешный ответ добавлен в кэш вопросов-ответов.")
+
         return {"content": [{"type": "text", "text": json.dumps(final_answer)}], "isError": False}
     else:
         raise ValueError(f"Неизвестное имя инструмента: {tool_name}")
