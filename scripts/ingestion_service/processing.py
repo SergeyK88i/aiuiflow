@@ -9,7 +9,7 @@ from scripts.services.giga_chat_copy import GigaChatAPI
 from nltk.tokenize import sent_tokenize
 
 # --- Конфигурация (должна быть согласована с другими частями системы) ---
-CHUNK_TARGET_SIZE = 1500
+CHUNK_TARGET_SIZE = 500
 
 # Инициализируем GigaChat API клиент один раз
 # В реальном приложении токен должен управляться централизованно

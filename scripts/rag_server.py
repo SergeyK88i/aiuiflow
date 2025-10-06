@@ -118,7 +118,9 @@ async def route_chunks(question: str, chunks: List[Dict[str, Any]], scratchpad: 
             json_str = selection_match.group(1).strip()
             json_str = re.sub(r'^```json\n', '', json_str)
             json_str = re.sub(r'\n```$', '', json_str)
-            selection_data = json.loads(json_str)
+            # Исправляем одинарные кавычки, которые может прислать модель
+            json_str_corrected = json_str.replace("'", '"')
+            selection_data = json.loads(json_str_corrected)
             selection = selection_data.get('chunk_ids', [])
         
         logger.info(f"Рассуждение модели: {reasoning}")

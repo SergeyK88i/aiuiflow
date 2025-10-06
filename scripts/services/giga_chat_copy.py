@@ -49,34 +49,52 @@ class GigaChatAPI:
         """Получение ответа от GigaChat с авто-обновлением токена."""
         for attempt in range(2):
             if not self.access_token:
-                logger.error("Токен доступа отсутствует, попытка обновления...")
+                logger.warning("Токен доступа отсутствует, попытка обновления...")
                 if not self.auth_token or not await self.get_token(self.auth_token):
                     raise Exception("Не удалось обновить токен, основной токен авторизации отсутствует.")
             
-            # ... (остальная логика без изменений) ...
             messages = [{"role": "system", "content": system_message}]
             messages.extend(self.conversation_history)
             messages.append({"role": "user", "content": user_message})
             url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-            payload = {"model": "GigaChat", "messages": messages, "temperature": 1, "top_p": 0.1, "n": 1, "stream": False, "max_tokens": 512, "repetition_penalty": 1, "update_interval": 0}
+            payload = {"model": "GigaChat-Pro", "messages": messages, "temperature": 1, "top_p": 0.1, "n": 1, "stream": False, "max_tokens": 512, "repetition_penalty": 1, "update_interval": 0}
             headers = {'Content-Type': 'application/json', 'Accept': 'application/json', 'Authorization': f'Bearer {self.access_token}'}
 
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.post(url, headers=headers, json=payload, ssl=False) as response:
                         if response.status == 200:
-                            # ... (логика обработки успешного ответа) ...
-                            return await response.json()
+                            data = await response.json()
+                            assistant_response = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                            if not assistant_response:
+                                 logger.error(f"❌ GigaChat вернул успешный ответ, но он пустой или в неожиданном формате. Ответ: {data}")
+                                 return {"success": False, "response": "", "error": "Empty or invalid response structure."}
+
+                            self.conversation_history.append({"role": "user", "content": user_message})
+                            self.conversation_history.append({"role": "assistant", "content": assistant_response})
+                            
+                            logger.info(f"✅ Получен ответ от GigaChat")
+                            return {
+                                "success": True,
+                                "response": assistant_response
+                            }
+
                         elif response.status == 401 and attempt == 0:
                             logger.warning("⚠️ Токен для chat/completions истек. Обновляю и пробую снова...")
                             self.access_token = None # Сбрасываем токен, чтобы инициировать обновление
                             continue # Переходим ко второй попытке
                         else:
-                            # ... (логика обработки других ошибок) ...
-                            return {"success": False, "error": f"API Error: {response.status}"}
+                            error_text = await response.text()
+                            logger.error(f"❌ Ошибка API GigaChat: {response.status} - {error_text}")
+                            return {"success": False, "error": f"API Error: {response.status} - {error_text}", "response": ""}
+            except aiohttp.ClientError as e:
+                logger.error(f"❌ Ошибка сети при запросе к GigaChat: {str(e)}")
+                return { "success": False, "error": str(e), "response": "" }
             except Exception as e:
-                return { "success": False, "error": str(e) }
-        return { "success": False, "error": "Не удалось выполнить запрос после обновления токена." }
+                logger.error(f"❌ Непредвиденная ошибка при запросе к GigaChat: {str(e)}", exc_info=True)
+                return { "success": False, "error": str(e), "response": "" }
+            
+        return { "success": False, "error": "Не удалось выполнить запрос после обновления токена.", "response": "" }
 
     def clear_history(self):
         self.conversation_history = []

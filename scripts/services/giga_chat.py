@@ -64,7 +64,7 @@ class GigaChatAPI:
 
         url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
         payload = {
-            "model": "GigaChat",
+            "model": "GigaChat-Pro",
             "messages": messages,
             "temperature": 1,
             "top_p": 0.1,

@@ -129,8 +129,8 @@ async def find_relevant_chunks(query_vector: List[float], limit: int = 25) -> Li
 async def rerank_chunks(question: str, chunks: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
     """Этап 2: Умная фильтрация. Использует LLM для выбора лучших чанков из кандидатов."""
     logger.info(f"🧠 Выполняю re-ranking для {len(chunks)} чанков с помощью LLM...")
-    system_message = ("Ты — эксперт-аналитик. Твоя задача — из списка фрагментов текста выбрать несколько самых важных, которые нужны для ответа на вопрос пользователя. "
-                      f"Ты должен вернуть JSON-объект с ключом 'best_chunk_ids', содержащим список ID ровно из {limit} лучших фрагментов.")
+    system_message = (f"Из представленных фрагментов текста выбери не более {limit} самых релевантных для ответа на вопрос. "
+                      "Верни ТОЛЬКО JSON-объект с ключом 'best_chunk_ids' и списком их ID. Пример: {\"best_chunk_ids\": [\"doc1_chunk2\", \"doc3_chunk5\"]}")
 
     context_for_reranking = ""
     for chunk in chunks:
@@ -140,17 +140,31 @@ async def rerank_chunks(question: str, chunks: List[Dict[str, Any]], limit: int 
 
     response = await gigachat_client.get_chat_completion(system_message, user_message)
     response_text = response.get('response', '')
+    logger.info(f"LLM Re-ranker RAW response: {response_text}")
 
     try:
         # Извлекаем JSON из ответа LLM
-        json_str = re.search(r"\{.*\}", response_text, re.DOTALL).group(0)
+        match = re.search(r"\{.*\}", response_text, re.DOTALL)
+        if not match:
+            logger.error("Re-ranker error: No JSON object found in the LLM response.")
+            return chunks[:limit]
+
+        json_str = match.group(0)
+        logger.info(f"Extracted JSON string for re-ranking: {json_str}")
+
         best_ids = json.loads(json_str).get('best_chunk_ids', [])
         logger.info(f"✅ LLM выбрал лучшие чанки: {best_ids}")
         
+        if not best_ids:
+            logger.warning("LLM re-ranker returned an empty list of chunk IDs.")
+
         # Возвращаем только те чанки, которые выбрал LLM, сохраняя исходный порядок
         selected_chunks = [chunk for chunk in chunks if chunk['id'] in best_ids]
         return selected_chunks[:limit] # Ограничиваем на случай, если LLM вернул больше
 
+    except json.JSONDecodeError as e:
+        logger.error(f"Re-ranker JSON parsing error: {e}. Returning top-{limit} initial candidates.")
+        return chunks[:limit]
     except Exception as e:
         logger.error(f"Ошибка re-ranking: не удалось извлечь ID из ответа LLM: {e}. Возвращаем топ-{limit} изначальных кандидатов.")
         # В случае ошибки просто возвращаем первые N чанков из изначального поиска
@@ -218,12 +232,12 @@ async def execute_db_shortcut_rag(question: str, source_chunk_ids: List[str]) ->
 async def execute_full_rag(question: str, query_vector: List[float]) -> Dict[str, Any]:
     """Выполняет полный гибридный RAG-пайплайн: Поиск -> Ранжирование -> Синтез."""
     # Шаг 1: Быстрый поиск (Retrieval)
-    candidate_chunks = await find_relevant_chunks(query_vector, limit=25)
+    candidate_chunks = await find_relevant_chunks(query_vector, limit=2)
     if not candidate_chunks:
         return {"answer": "К сожалению, я не смог найти релевантную информацию в базе знаний.", "source_chunk_ids": []}
 
     # Шаг 2: Умная фильтрация (Re-ranking)
-    final_chunks = await rerank_chunks(question, candidate_chunks, limit=5)
+    final_chunks = await rerank_chunks(question, candidate_chunks, limit=2)
 
     # Шаг 3: Синтез ответа
     context = "\n\n---\n\n".join([c['chunk_text'] for c in final_chunks])
