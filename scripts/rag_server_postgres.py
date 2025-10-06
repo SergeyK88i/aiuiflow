@@ -188,8 +188,10 @@ async def json_rpc_handler(request: Request):
         return JSONResponse(status_code=500, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": "Internal Error", "data": str(e)}})
 
 async def execute_db_shortcut_rag(question: str, source_chunk_ids: List[str]) -> str:
-    """Выполняет RAG с 'расширением контекста' до полных глав."""
+    """Выполняет RAG с 'расширением контекста' до полных глав с защитой от переполнения."""
     logger.info(f"SHORTCUT: Запуск RAG с расширением контекста для {len(source_chunk_ids)} исходных чанков.")
+    CONTEXT_MAX_SIZE = 12000  # Безопасный лимит символов для контекста
+
     if not db_pool:
         raise Exception("Пул соединений с базой данных не инициализирован.")
 
@@ -209,7 +211,16 @@ async def execute_db_shortcut_rag(question: str, source_chunk_ids: List[str]) ->
                 """SELECT chunk_text FROM chunks WHERE header_1 = ANY($1::TEXT[]) ORDER BY doc_name, chunk_sequence_num""",
                 parent_chapters
             )
-            context_texts = [record['chunk_text'] for record in full_chapter_records]
+            
+            total_context_len = 0
+            for record in full_chapter_records:
+                record_text = record['chunk_text']
+                if total_context_len + len(record_text) > CONTEXT_MAX_SIZE:
+                    logger.warning(f"Контекст главы превысил лимит ({CONTEXT_MAX_SIZE} симв.), обрезаем...")
+                    break
+                context_texts.append(record_text)
+                total_context_len += len(record_text)
+
         else:
             # Fallback: если главы не найдены, используем старую логику (только исходные чанки)
             logger.warning("Родительские главы для кэшированных чанков не найдены. Используем только исходные чанки.")
@@ -232,12 +243,12 @@ async def execute_db_shortcut_rag(question: str, source_chunk_ids: List[str]) ->
 async def execute_full_rag(question: str, query_vector: List[float]) -> Dict[str, Any]:
     """Выполняет полный гибридный RAG-пайплайн: Поиск -> Ранжирование -> Синтез."""
     # Шаг 1: Быстрый поиск (Retrieval)
-    candidate_chunks = await find_relevant_chunks(query_vector, limit=2)
+    candidate_chunks = await find_relevant_chunks(query_vector, limit=25)
     if not candidate_chunks:
         return {"answer": "К сожалению, я не смог найти релевантную информацию в базе знаний.", "source_chunk_ids": []}
 
     # Шаг 2: Умная фильтрация (Re-ranking)
-    final_chunks = await rerank_chunks(question, candidate_chunks, limit=2)
+    final_chunks = await rerank_chunks(question, candidate_chunks, limit=5)
 
     # Шаг 3: Синтез ответа
     context = "\n\n---\n\n".join([c['chunk_text'] for c in final_chunks])
