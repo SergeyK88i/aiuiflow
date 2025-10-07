@@ -2,7 +2,14 @@ import asyncio
 import aiohttp
 import json
 
-TELEGRAM_TOKEN = "7768666638:AAH-bOhEwfunRXFrIcE3TVT0xipdycXx7dM"
+import os
+import sys
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    print("❌ КРИТИЧЕСКАЯ ОШИБКА: Переменная окружения TELEGRAM_TOKEN не установлена!")
+    sys.exit(1)
+
 API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 # START_NODE_ID = "node-1750962779368"
 # LOCAL_WORKFLOW_URL = f"http://localhost:8000/execute-workflow/sales_consultation?startNodeId={START_NODE_ID}"

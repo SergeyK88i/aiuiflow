@@ -36,7 +36,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Конфигурация ---
-GIGACHAT_AUTH_TOKEN = "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmQ1OWQzZmI1LTcwOWItNDEyNS04MGU1LTUwNzFlOTQ3ODk5Zg=="
+GIGACHAT_AUTH_TOKEN = os.getenv("GIGACHAT_AUTH_TOKEN")
+if not GIGACHAT_AUTH_TOKEN:
+    logger.critical("❌ КРИТИЧЕСКАЯ ОШИБКА: Переменная окружения GIGACHAT_AUTH_TOKEN не установлена!")
+    sys.exit(1)
 MAX_DEPTH = 2
 TOP_LEVEL_CHUNK_TARGET_SIZE = 20000
 LOWER_LEVEL_CHUNK_TARGET_SIZE = 5000

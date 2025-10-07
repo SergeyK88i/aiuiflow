@@ -6,9 +6,16 @@ import logging
 import uuid
 import aiohttp
 
+import os
+import sys
+
 # --- Конфигурация ---
-# ВАЖНО: Замените на ваш реальный токен
-TELEGRAM_TOKEN = "7768666638:AAH-bOhEwfunRXFrIcE3TVT0xipdycXx7dM"
+# ВАЖНО: Токен теперь читается из переменной окружения
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    logging.critical("❌ КРИТИЧЕСКАЯ ОШИБКА: Переменная окружения TELEGRAM_TOKEN не установлена!")
+    sys.exit(1)
+
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 # --- Настройка логирования ---
