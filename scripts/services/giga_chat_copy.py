@@ -57,7 +57,7 @@ class GigaChatAPI:
             messages.extend(self.conversation_history)
             messages.append({"role": "user", "content": user_message})
             url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-            payload = {"model": "GigaChat-Pro", "messages": messages, "temperature": 1, "top_p": 0.1, "n": 1, "stream": False, "max_tokens": 512, "repetition_penalty": 1, "update_interval": 0}
+            payload = {"model": "GigaChat", "messages": messages, "temperature": 1, "top_p": 0.1, "n": 1, "stream": False, "max_tokens": 512, "repetition_penalty": 1, "update_interval": 0}
             headers = {'Content-Type': 'application/json', 'Accept': 'application/json', 'Authorization': f'Bearer {self.access_token}'}
 
             try:
