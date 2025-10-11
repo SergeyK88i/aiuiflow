@@ -1,6 +1,7 @@
 
 import logging
 import json
+import os
 from datetime import datetime
 from typing import Dict, Any
 
@@ -15,7 +16,12 @@ async def execute_gigachat(node: Node, label_to_id_map: Dict[str, str], input_da
     start_time = datetime.now()
     logger.info(f"Executing GigaChat node: {node.id}")
     config = node.data.get('config', {})
+    
+    # Новая логика получения токена
     auth_token = config.get('authToken')
+    if not auth_token:
+        auth_token = os.getenv('GIGACHAT_AUTH_TOKEN')
+
     clear_history = config.get('clearHistory', False)
 
     system_message = config.get('systemMessage', 'Ты полезный ассистент')
@@ -35,7 +41,7 @@ async def execute_gigachat(node: Node, label_to_id_map: Dict[str, str], input_da
             logger.info(f"📝 Сообщение после замены: {user_message}")
 
     if not auth_token or not user_message:
-        raise Exception("GigaChat: Auth token and user message are required")
+        raise Exception("GigaChat: Auth token is not configured in the node and GIGACHAT_AUTH_TOKEN environment variable is not set.")
 
     logger.info(f"🤖 Выполнение GigaChat ноды: {node.id}")
     logger.info(f"📝 Вопрос: {user_message}")

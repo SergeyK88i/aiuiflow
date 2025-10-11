@@ -1,5 +1,6 @@
 import logging
 import json
+import os
 from typing import Dict, Any
 import uuid
 from datetime import datetime
@@ -57,11 +58,12 @@ async def re_plan_in_memory(session: Dict[str, Any]) -> Dict[str, Any]:
 
     # 1. Instantiate a GigaChat API client
     gigachat_api = GigaChatAPI()
-    auth_token = config.get('dispatcherAuthToken', '')
+    auth_token = config.get('dispatcherAuthToken')
     if not auth_token:
-        raise Exception("Auth token for dispatcher not found in session config.")
+        auth_token = os.getenv('GIGACHAT_AUTH_TOKEN')
+    if not auth_token:
+        raise Exception("Auth token for dispatcher not found in session config or environment variables.")
 
-    # 2. Format the history for the prompt
     history_str = ""
     for i, record in enumerate(history):
         step_info = record.get("step_info", {})
@@ -69,10 +71,8 @@ async def re_plan_in_memory(session: Dict[str, Any]) -> Dict[str, Any]:
         history_str += f"Шаг {i+1}: Я выполнил воркфлоу `{step_info.get('workflow_id')}` с описанием `{step_info.get('description')}`.\n"
         history_str += f"Результат: {json.dumps(result, ensure_ascii=False, indent=2)}\n\n"
 
-    # 3. Get available workflows from the stored config
     available_workflows = config.get('availableWorkflows', {})
     if not available_workflows:
-         # If there are no tools, we can't make a new plan.
         logger.warning("No available workflows found in dispatcher config for re-planning. Aborting.")
         session['plan'] = []
         return session
@@ -82,7 +82,6 @@ async def re_plan_in_memory(session: Dict[str, Any]) -> Dict[str, Any]:
         for wf_id, wf_config in available_workflows.items()
     ])
 
-    # 4. Build the re-planning prompt
     re_planning_prompt = f"""
 ===Изиагада задача ===
 {initial_query}
@@ -104,14 +103,12 @@ async def re_plan_in_memory(session: Dict[str, Any]) -> Dict[str, Any]:
 """
     logger.info(f"🤖 Re-planning prompt for GigaChat:\n{re_planning_prompt}")
 
-    # 5. Call GigaChat to get the new plan
     if await gigachat_api.get_token(auth_token):
         result = await gigachat_api.get_chat_completion(
             "You are an advanced AI agent that analyzes completed work and plans the next steps.",
             re_planning_prompt
         )
         try:
-            # Clean up potential markdown code blocks
             raw_response_text = result.get('response', '[]')
             match = re.search(r'```(json)?\s*([\s\S]*?)\s*```', raw_response_text)
             if match:
@@ -127,13 +124,11 @@ async def re_plan_in_memory(session: Dict[str, Any]) -> Dict[str, Any]:
             session['plan'] = new_plan
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Error parsing new plan from LLM: {result.get('response')}. Error: {e}")
-            # On failure, abort by returning an empty plan.
             session['plan'] = []
     else:
         raise Exception("Failed to get GigaChat token for re-planning.")
 
     return session
-
 
 async def handle_workflow_return(dispatcher_id: str, sessions: Dict, input_data: Dict[str, Any]):
     """Обрабатывает возврат от workflow"""
@@ -143,7 +138,6 @@ async def handle_workflow_return(dispatcher_id: str, sessions: Dict, input_data:
     
     session = sessions[session_id]
     
-    # Save result of the completed step to the history
     if session['current_step'] < len(session['plan']):
         completed_step_info = session['plan'][session['current_step']]
         step_result = input_data.get('workflow_result', {})
@@ -153,28 +147,23 @@ async def handle_workflow_return(dispatcher_id: str, sessions: Dict, input_data:
             "timestamp": datetime.now().isoformat()
         })
 
-    # Check for agent mode and re-plan if enabled
     if session.get('is_agent_mode', False):
         logger.info(f"Agent mode enabled for session {session_id}. Re-planning...")
         session = await re_plan_in_memory(session)
-        # After re-planning, we start from the beginning of the new plan
         session['current_step'] = 0
     else:
-        # In simple orchestrator mode, just move to the next step
         session['current_step'] += 1
     
-    # Check if the plan is complete
     if session['current_step'] >= len(session['plan']):
         logger.info(f"✅ План для сессии {session_id} выполнен полностью")
         final_result = {
             "success": True,
             "message": "План выполнен успешно",
-            "results": session['execution_history'] # Return the full history
+            "results": session['execution_history']
         }
         del sessions[session_id]
         return final_result
 
-    # Launch the next step
     next_step = session['plan'][session['current_step']]
     next_workflow_id = next_step.get('workflow_id')
     logger.info(f"➡️ Переход к шагу {session['current_step']}: {next_workflow_id}")
@@ -197,7 +186,9 @@ async def handle_workflow_return(dispatcher_id: str, sessions: Dict, input_data:
 async def create_execution_plan(config: Dict, user_query: str, gigachat_api: GigaChatAPI):
     """Создает план выполнения через GigaChat"""
     available_workflows = config.get('availableWorkflows', {})
-    auth_token = config.get('dispatcherAuthToken', '')
+    auth_token = config.get('dispatcherAuthToken')
+    if not auth_token:
+        auth_token = os.getenv('GIGACHAT_AUTH_TOKEN')
     
     if not auth_token:
         raise Exception("Токен авторизации для планирующего диспетчера не указан")
@@ -265,11 +256,10 @@ async def create_new_orchestrator_session(dispatcher_id: str, sessions: Dict, co
         first_step = plan[0]
         workflow_id = first_step.get('workflow_id')
         if workflow_id:
-            # Create the standardized input context for the first step
             workflow_input = {
                 "initial_query": user_query,
-                "last_step_result": {},  # Exists, but is empty
-                "execution_history": [],   # Exists, but is empty
+                "last_step_result": {}, 
+                "execution_history": [],
                 "dispatcher_context": {
                     "session_id": session_id,
                     "plan": plan,
@@ -298,6 +288,8 @@ async def execute_router_dispatcher(node: Node, label_to_id_map: Dict[str, str],
     if config.get('useAI', True):
         auth_token = config.get('dispatcherAuthToken')
         if not auth_token:
+            auth_token = os.getenv('GIGACHAT_AUTH_TOKEN')
+        if not auth_token:
             raise Exception("Dispatcher: GigaChat auth token is required for AI mode.")
 
         dispatcher_prompt = config.get('dispatcherPrompt') or "Определи категорию запроса: {категории}. Запрос: {запрос пользователя}. Ответь одним словом."
@@ -308,15 +300,12 @@ async def execute_router_dispatcher(node: Node, label_to_id_map: Dict[str, str],
         if await gigachat_api.get_token(auth_token):
             gigachat_result = await gigachat_api.get_chat_completion("Ты - классификатор запросов.", classification_prompt)
             
-            # NEW: Проверяем, что вызов API был успешным
             if gigachat_result and gigachat_result.get('success'):
                 response_text = gigachat_result.get('response', 'default').strip().lower()
                 if response_text in workflow_routes:
                     category = response_text
             else:
-                # NEW: Если API вернул ошибку, логируем ее и используем 'default'
                 logger.error(f"GigaChat API call failed: {gigachat_result.get('error')}. Falling back to 'default' category.")
-                # category уже 'default', так что дополнительных действий не нужно
         else:
              logger.error("Dispatcher: Failed to get GigaChat token.")
     else:
@@ -344,7 +333,6 @@ async def execute_router_dispatcher(node: Node, label_to_id_map: Dict[str, str],
     
     sub_workflow_result = await execute_workflow_internal(workflow_request, initial_input_data={**input_data, "dispatcher_info": {"category": category}})
     
-    # Возвращаем полный результат, а не только .result
     return sub_workflow_result.dict()
 
 async def execute_orchestrator_dispatcher(node: Node, label_to_id_map: Dict[str, str], input_data: Dict[str, Any], gigachat_api: GigaChatAPI, all_results: Dict[str, Any]):
