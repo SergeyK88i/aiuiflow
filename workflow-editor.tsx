@@ -1019,9 +1019,9 @@ useEffect(() => {
 
     const defaultConfigs = {
       gigachat: {
-        role: "assistant", // Добавляем роль по умолчанию
-        authToken:
-          "ZmU1MTI4YWYtMzc0My00ZmU1LThhNzEtMmUyZGI0ZjQzMDlhOmU0MjFiYTNiLWY1MmQtNDU2ZS1hY2ViLTg4MjY0ODlmZTFlMw==",
+        role: "assistant",
+        useCustomAuthToken: false, // Использовать глобальный токен по умолчанию
+        authToken: "", // По умолчанию пусто
         systemMessage: "Ты полезный ассистент, который отвечает кратко и по делу.",
         userMessage: "Привет! Расскажи что-нибудь интересное о программировании.",
         clearHistory: false,
@@ -1795,16 +1795,39 @@ useEffect(() => {
                         </p>
                       </div>
                       
-                      <div>
-                        <Label htmlFor="authToken">Auth Token</Label>
-                        <Input
-                          id="authToken"
-                          type="password"
-                          placeholder="Введите токен авторизации"
-                          value={selectedNode.data.config.authToken || ""}
-                          onChange={(e) => updateNodeConfig("authToken", e.target.value)}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Base64 токен для доступа к GigaChat API</p>
+                      <div className="space-y-2 rounded-lg border p-3">
+                        <div className="flex items-center space-x-2">
+                            <Switch
+                                id="useCustomAuthToken"
+                                checked={!!selectedNode.data.config.useCustomAuthToken}
+                                onCheckedChange={(checked) => {
+                                    updateNodeConfig("useCustomAuthToken", checked);
+                                    if (!checked) {
+                                        updateNodeConfig("authToken", "");
+                                    }
+                                }}
+                            />
+                            <Label htmlFor="useCustomAuthToken">Использовать кастомный токен</Label>
+                        </div>
+                        {selectedNode.data.config.useCustomAuthToken && (
+                            <div className="pt-2">
+                                <Label htmlFor="authToken">Auth Token</Label>
+                                <Input
+                                    id="authToken"
+                                    type="password"
+                                    autoComplete="off"
+                                    placeholder="Введите персональный токен"
+                                    value={selectedNode.data.config.authToken || ""}
+                                    onChange={(e) => updateNodeConfig("authToken", e.target.value)}
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Этот токен будет использован только для этой ноды.</p>
+                            </div>
+                        )}
+                        {!selectedNode.data.config.useCustomAuthToken && (
+                            <p className="pt-1 text-xs text-muted-foreground">
+                                Будет использован глобальный токен, заданный на сервере через переменную окружения GIGACHAT_AUTH_TOKEN.
+                            </p>
+                        )}
                       </div>
                       
                       <div>
@@ -2691,29 +2714,53 @@ useEffect(() => {
             <Label htmlFor="use-ai-switch">Использовать AI для маршрутизации</Label>
           </div>
           {selectedNode.data.config?.useAI && (
-            <div>
-              <Label>Токен GigaChat для диспетчера</Label>
-              <Input
-                type="password"
-                placeholder="Введите токен..."
-                value={selectedNode.data.config?.dispatcherAuthToken || ''}
-                onChange={(e) => updateNodeConfig('dispatcherAuthToken', e.target.value)}
-              />
-              <div className="mt-4">
-              <Label htmlFor="dispatcherPrompt">Промпт для AI маршрутизации</Label>
-              <Textarea
-                id="dispatcherPrompt"
-                placeholder="Определи категорию запроса пользователя и выбери подходящий обработчик..."
-                value={selectedNode.data.config?.dispatcherPrompt || ''}
-                onChange={e => updateNodeConfig('dispatcherPrompt', e.target.value)}
-                rows={5}
-                className="mt-1"
-              />
-              <div className="text-xs text-muted-foreground mt-1">
-                Здесь вы можете задать собственную инструкцию для GigaChat.<br />
-                Используйте <code>{'{категории}'}</code> и <code>{'{запрос пользователя}'}</code> для подстановки.
+            <div className="space-y-2 rounded-lg border p-3">
+              <div className="flex items-center space-x-2">
+                  <Switch
+                      id="useCustomDispatcherToken"
+                      checked={!!selectedNode.data.config.useCustomDispatcherToken}
+                      onCheckedChange={(checked) => {
+                          updateNodeConfig("useCustomDispatcherToken", checked);
+                          if (!checked) {
+                              updateNodeConfig("dispatcherAuthToken", "");
+                          }
+                      }}
+                  />
+                  <Label htmlFor="useCustomDispatcherToken">Использовать кастомный токен</Label>
               </div>
-            </div>
+                {selectedNode.data.config.useCustomDispatcherToken && (
+                    <div className="pt-2">
+                        <Label>Токен GigaChat для диспетчера</Label>
+                        <Input
+                            type="password"
+                            autoComplete="off"
+                            placeholder="Введите персональный токен..."
+                            value={selectedNode.data.config?.dispatcherAuthToken || ''}
+                            onChange={(e) => updateNodeConfig('dispatcherAuthToken', e.target.value)}
+                        />
+                    </div>
+                )}
+                {!selectedNode.data.config.useCustomDispatcherToken && (
+                    <p className="pt-1 text-xs text-muted-foreground">
+                        Будет использован глобальный токен GigaChat.
+                    </p>
+                )}
+            
+                <div className="mt-4">
+                  <Label htmlFor="dispatcherPrompt">Промпт для AI маршрутизации</Label>
+                  <Textarea
+                    id="dispatcherPrompt"
+                    placeholder="Определи категорию запроса пользователя и выбери подходящий обработчик..."
+                    value={selectedNode.data.config?.dispatcherPrompt || ''}
+                    onChange={e => updateNodeConfig('dispatcherPrompt', e.target.value)}
+                    rows={5}
+                    className="mt-1"
+                  />
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Здесь вы можете задать собственную инструкцию для GigaChat.<br />
+                    Используйте <code>{'{категории}'}</code> и <code>{'{запрос пользователя}'}</code> для подстановки.
+                  </div>
+                </div>
             </div>
           )}
           <h4 className="text-md font-semibold border-t pt-4">Маршруты</h4>
