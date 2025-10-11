@@ -67,9 +67,16 @@ async def execute_loop(node: Node, label_to_id_map: Dict[str, str], input_data: 
     if not sub_workflow_id:
         raise Exception("Loop node: subWorkflowId is required")
     
-    sub_workflow_data = get_workflow_by_id(sub_workflow_id)
-    if not sub_workflow_data:
+    sub_workflow_data_raw = await get_workflow_by_id(sub_workflow_id)
+    if not sub_workflow_data_raw:
         raise Exception(f"Loop node: subWorkflow with ID '{sub_workflow_id}' not found")
+
+    # Десериализуем поля nodes и connections из JSONB
+    sub_workflow_data = dict(sub_workflow_data_raw)
+    if sub_workflow_data.get('nodes'):
+        sub_workflow_data['nodes'] = json.loads(sub_workflow_data['nodes'])
+    if sub_workflow_data.get('connections'):
+        sub_workflow_data['connections'] = json.loads(sub_workflow_data['connections'])
     
     from scripts.core.workflow_engine import execute_workflow_internal
     async def run_subworkflow(item, idx):

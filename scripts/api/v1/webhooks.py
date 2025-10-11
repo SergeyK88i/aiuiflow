@@ -32,6 +32,8 @@ async def create_webhook(request: WebhookCreateRequest, http_request: Request):
     )
     return webhook_info
 
+import json
+
 @router.post("/webhooks/{webhook_id}", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_webhook(webhook_id: str, request: Request, background_tasks: BackgroundTasks):
     """
@@ -39,10 +41,23 @@ async def trigger_webhook(webhook_id: str, request: Request, background_tasks: B
     """
     target_workflow_id = None
     target_node_id = None
-    all_workflows = get_all_workflows()
+    
+    # Получаем краткий список всех workflow
+    all_workflows_summary = await get_all_workflows()
 
-    for wf_id, wf_data in all_workflows.items():
-        for node in wf_data.get('nodes', []):
+    # Итерируемся по всем workflow, чтобы найти нужный webhook_trigger
+    for wf_summary in all_workflows_summary:
+        wf_id = wf_summary.get('id')
+        # Получаем полные данные workflow для проверки узлов
+        wf_data_raw = await get_workflow_by_id(wf_id)
+        if not wf_data_raw:
+            continue
+
+        # Десериализуем узлы
+        nodes_json = wf_data_raw.get('nodes', '[]')
+        nodes = json.loads(nodes_json)
+
+        for node in nodes:
             if node.get('type') == 'webhook_trigger':
                 if node.get('data', {}).get('config', {}).get('webhookId') == webhook_id:
                     target_workflow_id = wf_id
@@ -54,10 +69,11 @@ async def trigger_webhook(webhook_id: str, request: Request, background_tasks: B
     if not target_workflow_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Webhook ID not found")
 
-    workflow_to_execute = get_workflow_by_id(target_workflow_id)
-    if not workflow_to_execute:
+    workflow_to_execute_raw = await get_workflow_by_id(target_workflow_id)
+    if not workflow_to_execute_raw:
          raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow to execute not found")
 
+    workflow_to_execute = dict(workflow_to_execute_raw)
     if workflow_to_execute.get("status") != "published":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workflow is not published.")
 
@@ -75,9 +91,13 @@ async def trigger_webhook(webhook_id: str, request: Request, background_tasks: B
         "query_params": query_params
     }
 
+    # Десериализуем данные перед передачей в движок
+    nodes = json.loads(workflow_to_execute.get('nodes', '[]'))
+    connections = json.loads(workflow_to_execute.get('connections', '[]'))
+
     execution_request = WorkflowExecuteRequest(
-        nodes=workflow_to_execute['nodes'],
-        connections=workflow_to_execute['connections'],
+        nodes=nodes,
+        connections=connections,
         startNodeId=target_node_id
     )
 

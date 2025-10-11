@@ -24,7 +24,7 @@ async def execute_filesystem(node: Node, input_data: Dict[str, Any], **kwargs) -
         for workflow_id, workflow_data in new_workflows.items():
             logger.info(f"➕ Adding/updating workflow: {workflow_id}")
             # Вызываем нашу централизованную функцию, которая сама все сохранит
-            add_workflow(workflow_id, workflow_data)
+            await add_workflow(workflow_id, workflow_data)
 
         return {
             "success": True,

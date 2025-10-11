@@ -1855,7 +1855,7 @@ useEffect(() => {
                     <>
                       <div>
                         <Label>Webhook Status</Label>
-                        {selectedNode.data.config.webhookUrl ? (
+                        {selectedNode.data.config?.webhookUrl ? (
                           <div className="space-y-2">
                             <div className="p-3 bg-green-50 rounded-md">
                               <p className="text-sm font-medium text-green-800">✅ Webhook активен</p>
@@ -1888,7 +1888,7 @@ useEffect(() => {
                       <div className="flex items-center space-x-2">
                         <Switch
                           id="authRequired"
-                          checked={selectedNode.data.config.authRequired || false}
+                          checked={selectedNode.data.config?.authRequired || false}
                           onCheckedChange={(checked) => updateNodeConfig("authRequired", checked)}
                         />
                         <Label htmlFor="authRequired">Требовать авторизацию</Label>
@@ -1899,7 +1899,7 @@ useEffect(() => {
                         <Textarea
                           id="allowedIps"
                           placeholder="192.168.1.1&#10;10.0.0.1"
-                          value={selectedNode.data.config.allowedIps || ""}
+                          value={selectedNode.data.config?.allowedIps || ""}
                           onChange={(e) => updateNodeConfig("allowedIps", e.target.value)}
                           rows={3}
                         />

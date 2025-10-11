@@ -1,51 +1,84 @@
+import asyncpg
 import json
 import logging
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
-WORKFLOWS_FILE = "saved_workflows.json"
+# Глобальный пул соединений
+db_pool = None
 
-# Это будет наше хранилище в памяти
-saved_workflows: Dict[str, Any] = {}
+async def init_db_pool():
+    """Инициализирует пул соединений с PostgreSQL."""
+    global db_pool
+    if db_pool:
+        return
 
-def save_workflows_to_disk():
-    """Сохраняет текущие workflows в JSON файл."""
     try:
-        with open(WORKFLOWS_FILE, "w", encoding="utf-8") as f:
-            json.dump(saved_workflows, f, ensure_ascii=False, indent=4)
-        logger.info(f"💾 Workflows сохранены в {WORKFLOWS_FILE}")
-    except IOError as e:
-        logger.error(f"❌ Не удалось записать workflows в файл {WORKFLOWS_FILE}: {e}")
+        db_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/dbname")
+        db_pool = await asyncpg.create_pool(db_url)
+        logger.info("✅ Пул соединений с PostgreSQL для сервиса workflows инициализирован.")
+    except Exception as e:
+        logger.error(f"❌ Не удалось инициализировать пул соединений с PostgreSQL: {e}")
+        db_pool = None
 
-def load_workflows_from_disk():
-    """Загружает workflows из JSON файла при старте."""
-    if os.path.exists(WORKFLOWS_FILE):
-        try:
-            with open(WORKFLOWS_FILE, "r", encoding="utf-8") as f:
-                global saved_workflows
-                saved_workflows = json.load(f)
-                logger.info(f"✅ Workflows загружены из {WORKFLOWS_FILE}")
-        except (IOError, json.JSONDecodeError) as e:
-            logger.error(f"❌ Не удалось загрузить workflows из файла {WORKFLOWS_FILE}: {e}")
-            saved_workflows = {}
-    else:
-        logger.warning(f"Файл {WORKFLOWS_FILE} не найден. Будет создан новый при первом сохранении.")
-        saved_workflows = {}
+async def close_db_pool():
+    """Закрывает пул соединений."""
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+        logger.info("🛑 Пул соединений с PostgreSQL для сервиса workflows закрыт.")
 
-# Функции для доступа к данным (вместо прямого доступа к глобальной переменной)
-def get_all_workflows() -> Dict[str, Any]:
-    return saved_workflows
+async def get_all_workflows() -> List[Dict[str, Any]]:
+    """Получает список всех workflows (только id и name)."""
+    if not db_pool:
+        raise Exception("Пул соединений с БД не инициализирован.")
+    
+    async with db_pool.acquire() as conn:
+        records = await conn.fetch("SELECT id, name, status, updated_at FROM workflow_service.workflows ORDER BY updated_at DESC")
+        return [dict(record) for record in records]
 
-def get_workflow_by_id(workflow_id: str) -> Dict[str, Any] | None:
-    return saved_workflows.get(workflow_id)
+async def get_workflow_by_id(workflow_id: str) -> Dict[str, Any] | None:
+    """Получает данные конкретного workflow по его ID."""
+    if not db_pool:
+        raise Exception("Пул соединений с БД не инициализирован.")
 
-def add_workflow(workflow_id: str, workflow_data: Dict[str, Any]):
-    saved_workflows[workflow_id] = workflow_data
-    save_workflows_to_disk()
+    async with db_pool.acquire() as conn:
+        record = await conn.fetchrow("SELECT * FROM workflow_service.workflows WHERE id = $1", workflow_id)
+        return dict(record) if record else None
 
-def delete_workflow_by_id(workflow_id: str):
-    if workflow_id in saved_workflows:
-        del saved_workflows[workflow_id]
-        save_workflows_to_disk()
+async def add_workflow(workflow_id: str, workflow_data: Dict[str, Any]):
+    """Добавляет или обновляет workflow в базе данных."""
+    if not db_pool:
+        raise Exception("Пул соединений с БД не инициализирован.")
+
+    name = workflow_data.get('name')
+    # Преобразуем словари в JSON-строки для записи в тип JSONB
+    nodes = json.dumps(workflow_data.get('nodes'))
+    connections = json.dumps(workflow_data.get('connections'))
+    status = workflow_data.get('status', 'draft')
+
+    async with db_pool.acquire() as conn:
+        # Используем INSERT ... ON CONFLICT для создания или обновления записи (UPSERT)
+        await conn.execute("""
+            INSERT INTO workflow_service.workflows (id, name, nodes, connections, status, updated_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                nodes = EXCLUDED.nodes,
+                connections = EXCLUDED.connections,
+                status = EXCLUDED.status,
+                updated_at = NOW();
+        """, workflow_id, name, nodes, connections, status)
+    logger.info(f"💾 Workflow '{workflow_id}' сохранен в базу данных.")
+
+
+async def delete_workflow_by_id(workflow_id: str):
+    """Удаляет workflow из базы данных."""
+    if not db_pool:
+        raise Exception("Пул соединений с БД не инициализирован.")
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM workflow_service.workflows WHERE id = $1", workflow_id)
+    logger.info(f"🗑️ Workflow '{workflow_id}' удален из базы данных.")

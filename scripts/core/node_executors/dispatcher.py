@@ -20,15 +20,19 @@ dispatcher_sessions: Dict[str, Dict[str, Any]] = {}
 async def launch_workflow_by_id(workflow_id: str, input_data: Dict[str, Any]):
     """Запускает workflow по ID"""
     from scripts.core.workflow_engine import execute_workflow_internal
-    workflow_data = get_workflow_by_id(workflow_id)
-    if not workflow_data:
+    workflow_data_raw = await get_workflow_by_id(workflow_id)
+    if not workflow_data_raw:
         raise Exception(f"Workflow {workflow_id} не найден в сохраненных workflow")
     
     logger.info(f"🚀 Запуск workflow {workflow_id}")
     
+    workflow_data = dict(workflow_data_raw)
+    nodes = json.loads(workflow_data.get('nodes', '[]'))
+    connections = json.loads(workflow_data.get('connections', '[]'))
+
     workflow_request = WorkflowExecuteRequest(
-        nodes=workflow_data["nodes"],
-        connections=workflow_data["connections"]
+        nodes=nodes,
+        connections=connections
     )
     
     # В асинхронном мире мы не можем просто ждать. 
@@ -328,11 +332,15 @@ async def execute_router_dispatcher(node: Node, label_to_id_map: Dict[str, str],
         raise Exception(f"Dispatcher: No route found for category '{category}'.")
 
     workflow_id = selected_route['workflow_id']
-    workflow_data = get_workflow_by_id(workflow_id)
-    if not workflow_data:
+    workflow_data_raw = await get_workflow_by_id(workflow_id)
+    if not workflow_data_raw:
         raise Exception(f"Dispatcher: Target workflow '{workflow_id}' not found.")
 
-    workflow_request = WorkflowExecuteRequest(nodes=workflow_data["nodes"], connections=workflow_data["connections"])
+    workflow_data = dict(workflow_data_raw)
+    nodes = json.loads(workflow_data.get('nodes', '[]'))
+    connections = json.loads(workflow_data.get('connections', '[]'))
+
+    workflow_request = WorkflowExecuteRequest(nodes=nodes, connections=connections)
     
     sub_workflow_result = await execute_workflow_internal(workflow_request, initial_input_data={**input_data, "dispatcher_info": {"category": category}})
     

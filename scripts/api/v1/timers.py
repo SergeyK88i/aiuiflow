@@ -23,7 +23,7 @@ async def setup_timer(request: SetupTimerRequest):
     timer_id = f"workflow_timer_{workflow_id}"
 
     # Получаем воркфлоу, чтобы проверить его статус
-    workflow = get_workflow_by_id(workflow_id)
+    workflow = await get_workflow_by_id(workflow_id)
 
     # Если воркфлоу по какой-то причине не найден, удаляем его таймер, если он был
     if not workflow:

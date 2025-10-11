@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any
 
@@ -62,18 +63,22 @@ async def timer_task(timer_id: str, node_id: str, interval: int, workflow_info: 
 
             try:
                 workflow_id = workflow_info.get("workflow_id")
-                if not workflow_id or not get_workflow_by_id(workflow_id):
+                workflow_exists = await get_workflow_by_id(workflow_id)
+                if not workflow_id or not workflow_exists:
                     logger.error(f"❌ Workflow с ID '{workflow_id}' не найден. Таймер {timer_id} не может запустить выполнение.")
                     continue
 
                 logger.info(f"🚀 Таймер {timer_id} запускает workflow '{workflow_id}'")
 
-                workflow_data = get_workflow_by_id(workflow_id)
+                workflow_data_raw = await get_workflow_by_id(workflow_id)
+                workflow_data = dict(workflow_data_raw)
+                nodes = json.loads(workflow_data.get('nodes', '[]'))
+                connections = json.loads(workflow_data.get('connections', '[]'))
 
                 from scripts.core.workflow_engine import execute_workflow_internal
                 workflow_request = WorkflowExecuteRequest(
-                    nodes=workflow_data["nodes"],
-                    connections=workflow_data["connections"],
+                    nodes=nodes,
+                    connections=connections,
                     startNodeId=node_id
                 )
 
@@ -117,15 +122,19 @@ async def execute_timer_now_by_id(timer_id: str):
 
     workflow_id = timer['workflow']['workflow_id']
     node_id = timer['node_id']
-    workflow_data = get_workflow_by_id(workflow_id)
+    workflow_data_raw = await get_workflow_by_id(workflow_id)
 
-    if not workflow_data:
+    if not workflow_data_raw:
         raise Exception(f"Workflow {workflow_id} not found")
+
+    workflow_data = dict(workflow_data_raw)
+    nodes = json.loads(workflow_data.get('nodes', '[]'))
+    connections = json.loads(workflow_data.get('connections', '[]'))
 
     from scripts.core.workflow_engine import execute_workflow_internal
     workflow_request = WorkflowExecuteRequest(
-        nodes=workflow_data["nodes"],
-        connections=workflow_data["connections"],
+        nodes=nodes,
+        connections=connections,
         startNodeId=node_id
     )
     return await execute_workflow_internal(workflow_request)
