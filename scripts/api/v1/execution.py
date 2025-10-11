@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Body
 from datetime import datetime
 from typing import Dict, Any, List
 
-from scripts.models.schemas import WorkflowExecuteRequest, ExecutionResult, Node
+from scripts.models.schemas import WorkflowExecuteRequest, ExecutionResult, Node, ExecuteNodeRequest
 from scripts.core.workflow_engine import execute_workflow_internal, get_executor, get_node_results, clear_node_results
 from scripts.services.giga_chat import GigaChatAPI
 
@@ -22,12 +22,11 @@ async def get_node_status(node_ids: List[str]):
     return {"results": results}
 
 @router.post("/execute-node")
-async def execute_node(
-    node_type: str,
-    node_data: Dict[str, Any],
-    input_data: Dict[str, Any] = None
-) -> ExecutionResult:
+async def execute_node(request: ExecuteNodeRequest) -> ExecutionResult:
     """Выполнение отдельной ноды"""
+    node_type = request.node_type
+    node_data = request.node_data
+    input_data = request.input_data
     try:
         node = Node(
             id=node_data.get('id', 'temp'),
@@ -44,9 +43,9 @@ async def execute_node(
         if node.type == 'gigachat':
             result = await executor(node, {}, input_data or {}, gigachat_api, {})
         elif node.type == 'dispatcher':
-            result = await executor(node, {}, input_data or {}, gigachat_api, dispatcher_sessions)
+            result = await executor(node, {}, input_data or {}, gigachat_api, {})
         else:
-            result = await executor(node, {}, input_data or {})
+            result = await executor(node, {}, input_data or {}, {})
         
         return ExecutionResult(
             success=True,

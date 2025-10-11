@@ -106,3 +106,9 @@ class SetupTimerRequest(BaseModel):
 class DispatcherCallbackRequest(BaseModel):
     session_id: str
     step_result: Dict[str, Any]
+
+# --- НОВАЯ МОДЕЛЬ ДЛЯ /execute-node ---
+class ExecuteNodeRequest(BaseModel):
+    node_type: str
+    node_data: Dict[str, Any]
+    input_data: Optional[Dict[str, Any]] = None
